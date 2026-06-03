@@ -1,0 +1,38 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local datasets and generated data links
+data/
+datasets/data/
+
+# Weights & Biases local run files
+wandb/
+
+# Model checkpoints and generated artifacts
+checkpoints/
+outputs/
+runs/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# macOS / editor files
+.DS_Store
+.vscode/
+.idea/
