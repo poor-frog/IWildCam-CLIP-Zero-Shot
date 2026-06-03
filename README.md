@@ -19,7 +19,7 @@ If you already have IWildCam data elsewhere, create a local symlink:
 
 ```bash
 mkdir -p data
-ln -s /Users/jky/Downloads/CLIP-DG/data/raw/iwildcam_v2.0 data/iwildcam_v2.0
+ln -s /Users/path/to/your/iwildcamp data/iwildcam_v2.0
 ```
 
 Then use `--data-location=./data`.
