@@ -48,19 +48,23 @@ def main(args):
     df_final.to_csv(args.save_file, sep='\t', index=False, header=True)
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-
+def build_parser():
+    parser = argparse.ArgumentParser(description='Prepare IWildCam prompt-caption CSV')
     parser.add_argument('--save_file',
-                        default='./datasets/csv/iwildcam_v2.0/train.csv')
+                        default='./data/train.csv')
     parser.add_argument('--english_label_path',
                         default='./src/datasets/iwildcam_metadata/labels.csv')
     parser.add_argument('--metadata',
-                        default='./datasets/data/iwildcam_v2.0/metadata.csv')
+                        default='./data/iwildcam_v2.0/metadata.csv')
     parser.add_argument('--data_dir',
-                        default='./datasets/data/iwildcam_v2.0/train')
-    args = parser.parse_args()
+                        default='./data/iwildcam_v2.0/train')
+    return parser
 
-    os.makedirs('./datasets/csv/iwildcam_v2.0', exist_ok=True)
+
+if __name__ == '__main__':
+    args = build_parser().parse_args()
+    save_dir = os.path.dirname(args.save_file)
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
 
     main(args)

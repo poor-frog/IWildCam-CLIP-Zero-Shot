@@ -24,6 +24,18 @@ ln -s PATH_TO_YOUR_IWILDCAM_DATASET data/iwildcam_v2.0
 
 Then use `--data-location=./data`.
 
+Optional: generate the prompt-caption training CSV used by the original FLYP-style data pipeline:
+
+```bash
+python3 ./scripts/prepare_iwildcam.py \
+    --metadata ./data/iwildcam_v2.0/metadata.csv \
+    --data_dir ./data/iwildcam_v2.0/train \
+    --english_label_path ./src/datasets/iwildcam_metadata/labels.csv \
+    --save_file ./data/train.csv
+```
+
+This creates `data/train.csv`. It is not required for the current zero-shot evaluation or Phase 1 CoOp training, which read IWildCam directly through WILDS.
+
 ## Zero-shot Evaluation
 
 ```bash
@@ -85,6 +97,66 @@ python src/main.py `
 ```
 
 W&B logs config (including `device`, `system_hostname`, and `system_user`), per-split metrics, and the final summary table.
+
+## CoOp Prompt Learning
+
+Phase 1 supports CoOp with local OpenAI CLIP models only: `RN50` and `ViT-B/32`. Do not use `ViT-B-16` or `ViT-L-14` for CoOp yet, because those names load `open_clip` models whose text encoder internals differ from the original CoOp implementation.
+
+Small smoke run:
+
+```bash
+KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_coop.py \
+    --model=ViT-B/32 \
+    --train-dataset=IWildCam \
+    --eval-datasets=IWildCamIDVal \
+    --data-location=./data \
+    --batch-size=4 \
+    --workers=0 \
+    --n-ctx=16 \
+    --ctx-init="a photo of a" \
+    --epochs=1 \
+    --max-train-batches=1 \
+    --max-eval-batches=1
+```
+
+Full CoOp training example:
+
+```bash
+KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_coop.py \
+    --model=ViT-B/32 \
+    --train-dataset=IWildCam \
+    --eval-datasets=IWildCamIDVal,IWildCamID,IWildCamOOD \
+    --data-location=./data \
+    --batch-size=32 \
+    --workers=4 \
+    --n-ctx=16 \
+    --ctx-init="a photo of a" \
+    --epochs=50 \
+    --lr=0.002 \
+    --wd=1e-5 \
+    --wandb \
+    --wandb-project=PoorFrogs \
+    --wandb-run-name=coop-vit-b32-iwildcam \
+    --save=./checkpoints/coop_prompt_learner.pt
+```
+
+Windows PowerShell smoke run:
+
+```powershell
+$env:PYTHONPATH="."
+python src/train_coop.py `
+    --model=ViT-B/32 `
+    --train-dataset=IWildCam `
+    --eval-datasets=IWildCamIDVal `
+    --data-location=./data `
+    --batch-size=4 `
+    --workers=0 `
+    --n-ctx=16 `
+    --ctx-init="a photo of a" `
+    --epochs=1 `
+    --max-train-batches=1 `
+    --max-eval-batches=1
+```
 
 ### Model options
 
