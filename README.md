@@ -19,7 +19,7 @@ If you already have IWildCam data elsewhere, create a local symlink:
 
 ```bash
 mkdir -p data
-ln -s /Users/path/to/your/iwildcamp data/iwildcam_v2.0
+ln -s PATH_TO_YOUR_IWILDCAM_DATASET data/iwildcam_v2.0
 ```
 
 Then use `--data-location=./data`.
@@ -32,6 +32,18 @@ KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/main.py \
     --template=iwildcam_template \
     --train-dataset=IWildCam \
     --eval-datasets=IWildCamIDVal,IWildCamID,IWildCamOOD \
+    --data-location=./data
+```
+
+On Windows PowerShell, set `PYTHONPATH` separately and omit `KMP_DUPLICATE_LIB_OK` unless you hit an OpenMP duplicate runtime error:
+
+```powershell
+$env:PYTHONPATH="."
+python src/main.py `
+    --model=ViT-B-16 `
+    --template=iwildcam_template `
+    --train-dataset=IWildCam `
+    --eval-datasets=IWildCamIDVal,IWildCamID,IWildCamOOD `
     --data-location=./data
 ```
 
@@ -54,6 +66,21 @@ KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/main.py \
     --data-location=./data \
     --wandb \
     --wandb-project=PoorFrogs \
+    --wandb-run-name=vit-b-16-iwildcam
+```
+
+Windows PowerShell version:
+
+```powershell
+$env:PYTHONPATH="."
+python src/main.py `
+    --model=ViT-B-16 `
+    --template=iwildcam_template `
+    --train-dataset=IWildCam `
+    --eval-datasets=IWildCamIDVal,IWildCamID,IWildCamOOD `
+    --data-location=./data `
+    --wandb `
+    --wandb-project=PoorFrogs `
     --wandb-run-name=vit-b-16-iwildcam
 ```
 
