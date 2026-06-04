@@ -12,6 +12,25 @@ from src.datasets.dataloader import maybe_dictionarize
 OPENAI_CLIP_MODELS = {"RN50", "RN101", "RN50x4", "RN50x16", "RN50x64", "ViT-B/32", "ViT-B/16", "ViT-L/14"}
 
 
+def should_use_data_parallel(device, cuda_device_count, disabled=False):
+    return device == "cuda" and cuda_device_count > 1 and not disabled
+
+
+def unwrap_model(model):
+    return model.module if hasattr(model, "module") else model
+
+
+def get_prompt_learner(model):
+    return unwrap_model(model).prompt_learner
+
+
+def maybe_data_parallel(model, args):
+    disabled = getattr(args, "no_data_parallel", False)
+    if should_use_data_parallel(args.device, torch.cuda.device_count(), disabled):
+        return torch.nn.DataParallel(model)
+    return model
+
+
 def ensure_openai_clip_for_coop(clip_model, model_name):
     required_attrs = (
         "token_embedding",
@@ -55,23 +74,22 @@ class PromptLearner(torch.nn.Module):
         n_cls = len(classnames)
         n_ctx = args.n_ctx
         ctx_init = args.ctx_init.replace("_", " ").strip()
-        dtype = clip_model.dtype
         ctx_dim = clip_model.ln_final.weight.shape[0]
         token_device = clip_model.token_embedding.weight.device
 
         if ctx_init:
             tokenized_ctx = clip.tokenize(ctx_init).to(token_device)
             with torch.no_grad():
-                embedding = clip_model.token_embedding(tokenized_ctx).type(dtype)
+                embedding = clip_model.token_embedding(tokenized_ctx).float()
             n_ctx = tokenized_ctx.argmax(dim=-1).item() - 1
             ctx_vectors = embedding[0, 1:1 + n_ctx, :]
             prompt_prefix = ctx_init
         elif args.csc:
-            ctx_vectors = torch.empty(n_cls, n_ctx, ctx_dim, dtype=dtype)
+            ctx_vectors = torch.empty(n_cls, n_ctx, ctx_dim, dtype=torch.float32)
             torch.nn.init.normal_(ctx_vectors, std=0.02)
             prompt_prefix = " ".join(["X"] * n_ctx)
         else:
-            ctx_vectors = torch.empty(n_ctx, ctx_dim, dtype=dtype)
+            ctx_vectors = torch.empty(n_ctx, ctx_dim, dtype=torch.float32)
             torch.nn.init.normal_(ctx_vectors, std=0.02)
             prompt_prefix = " ".join(["X"] * n_ctx)
 
@@ -86,7 +104,7 @@ class PromptLearner(torch.nn.Module):
 
         tokenized_prompts = torch.cat([clip.tokenize(prompt) for prompt in prompts]).to(token_device)
         with torch.no_grad():
-            embedding = clip_model.token_embedding(tokenized_prompts).type(dtype)
+            embedding = clip_model.token_embedding(tokenized_prompts).float()
 
         self.register_buffer("token_prefix", embedding[:, :1, :])
         self.register_buffer("token_suffix", embedding[:, 1 + n_ctx:, :])
@@ -97,8 +115,8 @@ class PromptLearner(torch.nn.Module):
         if ctx.dim() == 2:
             ctx = ctx.unsqueeze(0).expand(self.n_cls, -1, -1)
 
-        prefix = self.token_prefix
-        suffix = self.token_suffix
+        prefix = self.token_prefix.to(dtype=ctx.dtype, device=ctx.device)
+        suffix = self.token_suffix.to(dtype=ctx.dtype, device=ctx.device)
 
         if self.class_token_position == "end":
             return torch.cat([prefix, ctx, suffix], dim=1)
@@ -147,7 +165,7 @@ class CustomCLIP(torch.nn.Module):
 
     def forward(self, image):
         image_features = self.image_encoder(image.type(self.dtype))
-        prompts = self.prompt_learner()
+        prompts = self.prompt_learner().type(self.dtype)
         tokenized_prompts = self.tokenized_prompts.to(prompts.device)
         text_features = self.text_encoder(prompts, tokenized_prompts)
 
@@ -165,8 +183,9 @@ class TrainStats:
 
 def save_prompt_learner(model, path, args, classnames):
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    prompt_learner = get_prompt_learner(model)
     torch.save({
-        "prompt_learner": model.prompt_learner.state_dict(),
+        "prompt_learner": prompt_learner.state_dict(),
         "args": vars(args),
         "classnames": classnames,
     }, path)
@@ -174,7 +193,7 @@ def save_prompt_learner(model, path, args, classnames):
 
 def load_prompt_learner(model, path, device):
     checkpoint = torch.load(path, map_location=device)
-    model.prompt_learner.load_state_dict(checkpoint["prompt_learner"])
+    get_prompt_learner(model).load_state_dict(checkpoint["prompt_learner"])
 
 
 def train_one_epoch(model, dataloader, optimizer, args, epoch, wandb=None):
@@ -193,10 +212,17 @@ def train_one_epoch(model, dataloader, optimizer, args, epoch, wandb=None):
         labels = data["labels"].to(args.device)
 
         logits = model(images)
+        if not torch.isfinite(logits).all():
+            raise FloatingPointError(f"CoOp produced non-finite logits at epoch {epoch}, batch {batch_index}")
         loss = F.cross_entropy(logits, labels)
+        if not torch.isfinite(loss):
+            raise FloatingPointError(f"CoOp produced non-finite loss at epoch {epoch}, batch {batch_index}")
 
         optimizer.zero_grad()
         loss.backward()
+        for name, param in model.named_parameters():
+            if param.grad is not None and not torch.isfinite(param.grad).all():
+                raise FloatingPointError(f"CoOp produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
         optimizer.step()
 
         batch_size = labels.shape[0]

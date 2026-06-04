@@ -72,6 +72,7 @@ def parse_arguments():
     parser.add_argument("--wd", type=float, default=1e-5, help="CoOp prompt learner weight decay.")
     parser.add_argument("--max-train-batches", type=int, default=None, help="Optional train batch cap for smoke tests.")
     parser.add_argument("--max-eval-batches", type=int, default=None, help="Optional eval batch cap for smoke tests.")
+    parser.add_argument("--no-data-parallel", action="store_true", help="Disable CoOp DataParallel on multi-GPU CUDA hosts.")
 
     parsed_args = parser.parse_args()
     if torch.cuda.is_available():

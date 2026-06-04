@@ -13,7 +13,9 @@ from src.models.coop import (
     CustomCLIP,
     ensure_openai_clip_for_coop,
     eval_coop_single_dataset,
+    get_prompt_learner,
     load_prompt_learner,
+    maybe_data_parallel,
     save_prompt_learner,
     train_one_epoch,
 )
@@ -90,11 +92,14 @@ def main(args):
     )
     classnames = train_data.classnames
     model = CustomCLIP(args, classnames, clip_encoder.model).to(args.device)
+    model = maybe_data_parallel(model, args)
+    if hasattr(model, "module"):
+        print(f"Using DataParallel on {torch.cuda.device_count()} CUDA devices")
 
     if args.load is not None:
         load_prompt_learner(model, args.load, args.device)
 
-    optimizer = torch.optim.AdamW(model.prompt_learner.parameters(), lr=args.lr, weight_decay=args.wd)
+    optimizer = torch.optim.AdamW(get_prompt_learner(model).parameters(), lr=args.lr, weight_decay=args.wd)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
     wandb = init_wandb(args)
 
