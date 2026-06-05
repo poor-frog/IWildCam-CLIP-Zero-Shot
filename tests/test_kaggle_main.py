@@ -1,4 +1,6 @@
 import tempfile
+import os
+import sys
 import unittest
 from pathlib import Path
 
@@ -85,6 +87,28 @@ class KaggleMainTest(unittest.TestCase):
 
             self.assertEqual(resolved, clone_target)
             self.assertEqual(calls[0][0:2], ["git", "clone"])
+
+    def test_configure_import_path_adds_repo_root_to_python_imports(self):
+        from kaggle_main import configure_import_path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = str(Path(tmpdir) / "repo")
+            old_pythonpath = os.environ.get("PYTHONPATH")
+            original_sys_path = list(sys.path)
+            try:
+                os.environ.pop("PYTHONPATH", None)
+                sys.path = [path for path in sys.path if path != repo_root]
+
+                configure_import_path(repo_root)
+
+                self.assertEqual(os.environ["PYTHONPATH"], repo_root)
+                self.assertEqual(sys.path[0], repo_root)
+            finally:
+                if old_pythonpath is None:
+                    os.environ.pop("PYTHONPATH", None)
+                else:
+                    os.environ["PYTHONPATH"] = old_pythonpath
+                sys.path = original_sys_path
 
     def test_build_coop_training_argv_preserves_user_overrides(self):
         from kaggle_main import build_coop_training_argv

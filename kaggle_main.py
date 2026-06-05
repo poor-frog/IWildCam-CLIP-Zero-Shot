@@ -99,6 +99,13 @@ def ensure_repo_root(candidates=None, clone_target=DEFAULT_KAGGLE_WORKING_REPO, 
     return repo_root
 
 
+def configure_import_path(repo_root):
+    repo_root = str(repo_root)
+    os.environ["PYTHONPATH"] = repo_root
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
+
 def resolve_kaggle_data_location(repo_root, fallback_input_path=DEFAULT_KAGGLE_DATASET):
     local_data = Path(repo_root) / "data" / "iwildcam_v2.0"
     if local_data.exists():
@@ -188,7 +195,7 @@ def _configure_wandb_from_kaggle_secret():
 def main():
     repo_root = ensure_repo_root()
     os.chdir(repo_root)
-    os.environ.setdefault("PYTHONPATH", str(repo_root))
+    configure_import_path(repo_root)
 
     mode = parse_mode(sys.argv)
     if mode != "coop":
