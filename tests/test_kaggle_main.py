@@ -48,11 +48,43 @@ class KaggleMainTest(unittest.TestCase):
         self.assertIn("--train-dataset=IWildCam", argv)
         self.assertIn("--eval-datasets=IWildCamIDVal,IWildCamID,IWildCamOOD", argv)
         self.assertIn("--data-location=./data", argv)
-        self.assertIn("--epochs=50", argv)
+        self.assertIn("--epochs=15", argv)
         self.assertIn("--best-metric=F1-macro_all", argv)
         self.assertIn("--wandb-project=PoorFrogs", argv)
         self.assertIn("--wandb-run-name=coop-vit-b32-phase11-best-f1", argv)
         self.assertIn("--save=./checkpoints/coop_prompt_learner.pt", argv)
+
+    def test_find_repo_root_accepts_directory_with_project_markers(self):
+        from kaggle_main import find_repo_root
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            (repo_root / "src").mkdir(parents=True)
+            (repo_root / "src" / "train_coop.py").write_text("", encoding="utf-8")
+            (repo_root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+
+            self.assertEqual(find_repo_root([repo_root]), repo_root)
+
+    def test_ensure_repo_root_clones_when_candidates_are_flat_kaggle_src(self):
+        from kaggle_main import ensure_repo_root
+
+        calls = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            flat_src = Path(tmpdir) / "src"
+            clone_target = Path(tmpdir) / "working" / "IWildCam-CLIP-Zero-Shot"
+            flat_src.mkdir(parents=True)
+
+            def fake_check_call(command):
+                calls.append(command)
+                (clone_target / "src").mkdir(parents=True)
+                (clone_target / "src" / "train_coop.py").write_text("", encoding="utf-8")
+                (clone_target / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+
+            resolved = ensure_repo_root([flat_src], clone_target, check_call=fake_check_call)
+
+            self.assertEqual(resolved, clone_target)
+            self.assertEqual(calls[0][0:2], ["git", "clone"])
 
     def test_build_coop_training_argv_preserves_user_overrides(self):
         from kaggle_main import build_coop_training_argv
@@ -61,7 +93,7 @@ class KaggleMainTest(unittest.TestCase):
 
         self.assertIn("--epochs=1", argv)
         self.assertIn("--wandb-run-name=debug", argv)
-        self.assertNotIn("--epochs=50", argv)
+        self.assertNotIn("--epochs=15", argv)
         self.assertNotIn("--wandb-run-name=coop-vit-b32-phase11-best-f1", argv)
 
 

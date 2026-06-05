@@ -6,6 +6,8 @@ from pathlib import Path
 
 DEFAULT_KAGGLE_DATASET = "/kaggle/input/iwildcam-v2-0-2020-wilds-dataset"
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parent
+DEFAULT_GITHUB_REPO = "https://github.com/poor-frog/IWildCam-CLIP-Zero-Shot.git"
+DEFAULT_KAGGLE_WORKING_REPO = Path("/kaggle/working/IWildCam-CLIP-Zero-Shot")
 
 COOP_DEFAULTS = {
     "--model": "ViT-B/32",
@@ -15,7 +17,7 @@ COOP_DEFAULTS = {
     "--workers": "4",
     "--n-ctx": "16",
     "--ctx-init": "a photo of a",
-    "--epochs": "50",
+    "--epochs": "15",
     "--lr": "0.002",
     "--wd": "1e-5",
     "--val-dataset": "IWildCamIDVal",
@@ -59,6 +61,42 @@ def _provided_option_names(argv):
             continue
         names.add(arg.split("=", 1)[0])
     return names
+
+
+def is_project_root(path):
+    path = Path(path)
+    has_package_config = (path / "pyproject.toml").exists() or (path / "setup.py").exists()
+    return has_package_config and (path / "src" / "train_coop.py").exists()
+
+
+def find_repo_root(candidates):
+    for candidate in candidates:
+        candidate = Path(candidate)
+        if is_project_root(candidate):
+            return candidate
+    return None
+
+
+def ensure_repo_root(candidates=None, clone_target=DEFAULT_KAGGLE_WORKING_REPO, check_call=subprocess.check_call):
+    candidates = candidates or [
+        DEFAULT_REPO_ROOT,
+        DEFAULT_KAGGLE_WORKING_REPO,
+        Path("/kaggle/working/PoorFrogs"),
+        Path("/kaggle/working"),
+    ]
+    repo_root = find_repo_root(candidates)
+    if repo_root is not None:
+        return repo_root
+
+    clone_target = Path(clone_target)
+    if not clone_target.exists():
+        clone_target.parent.mkdir(parents=True, exist_ok=True)
+        check_call(["git", "clone", DEFAULT_GITHUB_REPO, str(clone_target)])
+
+    repo_root = find_repo_root([clone_target])
+    if repo_root is None:
+        raise FileNotFoundError(f"Could not locate or clone PoorFrogs repo at {clone_target}")
+    return repo_root
 
 
 def resolve_kaggle_data_location(repo_root, fallback_input_path=DEFAULT_KAGGLE_DATASET):
@@ -129,6 +167,8 @@ def _ensure_deps():
 
 
 def _ensure_local_package_installed(repo_root):
+    if not is_project_root(repo_root):
+        return
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-e", str(repo_root)])
 
 
@@ -146,7 +186,7 @@ def _configure_wandb_from_kaggle_secret():
 
 
 def main():
-    repo_root = DEFAULT_REPO_ROOT
+    repo_root = ensure_repo_root()
     os.chdir(repo_root)
     os.environ.setdefault("PYTHONPATH", str(repo_root))
 
