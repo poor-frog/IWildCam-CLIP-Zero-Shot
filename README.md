@@ -140,6 +140,24 @@ KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_coop.py \
     --save=./checkpoints/coop_prompt_learner.pt
 ```
 
+During training, CoOp validates after every epoch on `--val-dataset` (default: `IWildCamIDVal`), saves the best prompt learner by `--best-metric` (default: `F1-macro_all` with `top1` fallback), and loads that best checkpoint before the final `--eval-datasets` report. With `--save=./checkpoints/coop_prompt_learner.pt`, the best checkpoint is written to `./checkpoints/coop_prompt_learner_best.pt`; use `--best-checkpoint=PATH` to override it or `--no-load-best-for-eval` to report the last epoch instead.
+
+Evaluate a saved best checkpoint without more training:
+
+```bash
+KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_coop.py \
+    --model=ViT-B/32 \
+    --train-dataset=IWildCam \
+    --eval-datasets=IWildCamIDVal,IWildCamID,IWildCamOOD \
+    --data-location=./data \
+    --batch-size=32 \
+    --workers=4 \
+    --n-ctx=16 \
+    --ctx-init="a photo of a" \
+    --epochs=0 \
+    --load=./checkpoints/coop_prompt_learner_best.pt
+```
+
 Windows PowerShell smoke run:
 
 ```powershell
