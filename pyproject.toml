@@ -7,7 +7,7 @@ name = "poorfrogs"
 version = "0.1.0"
 description = "Zero-shot CLIP evaluation on the WILDS IWildCam dataset."
 readme = "README.md"
-requires-python = ">=3.10,<3.11"
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "braceexpand==0.1.7",
     "ftfy==6.3.1",
