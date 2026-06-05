@@ -73,6 +73,10 @@ def parse_arguments():
     parser.add_argument("--max-train-batches", type=int, default=None, help="Optional train batch cap for smoke tests.")
     parser.add_argument("--max-eval-batches", type=int, default=None, help="Optional eval batch cap for smoke tests.")
     parser.add_argument("--no-data-parallel", action="store_true", help="Disable CoOp DataParallel on multi-GPU CUDA hosts.")
+    parser.add_argument("--val-dataset", type=str, default="IWildCamIDVal", help="Validation dataset for CoOp best checkpoint selection.")
+    parser.add_argument("--best-metric", type=str, default="F1-macro_all", help="Validation metric used to select the best CoOp checkpoint; falls back to top1 when missing.")
+    parser.add_argument("--best-checkpoint", type=str, default=None, help="Optional path for the best CoOp checkpoint.")
+    parser.add_argument("--no-load-best-for-eval", action="store_true", help="Skip loading the best CoOp checkpoint before final eval.")
 
     parsed_args = parser.parse_args()
     if torch.cuda.is_available():

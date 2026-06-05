@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 from types import SimpleNamespace
 
 import torch
@@ -36,6 +37,50 @@ class DummyOpenCLIP(torch.nn.Module):
 
 
 class CoOpModuleTest(unittest.TestCase):
+    def test_validation_score_prefers_requested_metric_and_falls_back_to_top1(self):
+        from src.train_coop import get_validation_score
+
+        self.assertEqual(
+            get_validation_score({"top1": 0.7, "F1-macro_all": 0.25}, "F1-macro_all"),
+            0.25,
+        )
+        self.assertEqual(
+            get_validation_score({"top1": 0.7}, "F1-macro_all"),
+            0.7,
+        )
+
+    def test_best_checkpoint_path_uses_save_directory_when_no_explicit_path(self):
+        from src.train_coop import resolve_best_checkpoint_path
+
+        args = SimpleNamespace(save="checkpoints", best_checkpoint=None)
+
+        self.assertEqual(
+            resolve_best_checkpoint_path(args),
+            "checkpoints/coop_prompt_learner_best.pt",
+        )
+
+    def test_save_prompt_learner_accepts_filename_without_parent_directory(self):
+        from src.models.coop import CustomCLIP, save_prompt_learner
+
+        args = SimpleNamespace(
+            model="ViT-B/32",
+            n_ctx=2,
+            ctx_init="",
+            class_token_position="end",
+            csc=False,
+            device="cpu",
+        )
+        model = CustomCLIP(args, ["frog", "deer"], DummyOpenAIClip())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = "prompt.pt"
+            cwd = __import__("os").getcwd()
+            try:
+                __import__("os").chdir(tmpdir)
+                save_prompt_learner(model, path, args, ["frog", "deer"])
+                self.assertTrue(__import__("os").path.exists(path))
+            finally:
+                __import__("os").chdir(cwd)
+
     def test_openai_clip_guard_accepts_openai_clip_api(self):
         from src.models.coop import ensure_openai_clip_for_coop
 

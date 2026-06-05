@@ -2,6 +2,7 @@ import getpass
 import os
 import random
 import socket
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -73,6 +74,44 @@ def log_wandb_summary(wandb, summary_rows):
     wandb.log({"eval/summary": table})
 
 
+def get_validation_score(results, metric_name):
+    value = results.get(metric_name)
+    if value is None:
+        value = results.get("top1")
+    if value is None:
+        raise KeyError(f"Validation results include neither {metric_name!r} nor 'top1'.")
+    return float(value)
+
+
+def resolve_save_path(save_path):
+    if save_path is None:
+        return None
+    if os.path.isdir(save_path) or not os.path.splitext(save_path)[1]:
+        return os.path.join(save_path, "coop_prompt_learner.pt")
+    return save_path
+
+
+def resolve_best_checkpoint_path(args):
+    if args.best_checkpoint is not None:
+        return args.best_checkpoint
+    if args.save is not None:
+        save_path = Path(args.save)
+        if os.path.isdir(args.save) or save_path.suffix == "":
+            return str(save_path / "coop_prompt_learner_best.pt")
+        return str(save_path.with_name(f"{save_path.stem}_best{save_path.suffix}"))
+    return os.path.join("checkpoints", "coop_prompt_learner_best.pt")
+
+
+def build_eval_dataset(dataset_name, clip_encoder, args):
+    eval_dataset_class = getattr(datasets, dataset_name)
+    return eval_dataset_class(
+        clip_encoder.val_preprocess,
+        location=args.data_location,
+        batch_size=args.batch_size,
+        num_workers=args.workers,
+    )
+
+
 def main(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -102,6 +141,12 @@ def main(args):
     optimizer = torch.optim.AdamW(get_prompt_learner(model).parameters(), lr=args.lr, weight_decay=args.wd)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
     wandb = init_wandb(args)
+    best_score = None
+    best_epoch = None
+    best_checkpoint_path = resolve_best_checkpoint_path(args)
+    val_dataset = None
+    if args.val_dataset is not None and args.epochs > 0:
+        val_dataset = build_eval_dataset(args.val_dataset, clip_encoder, args)
 
     for epoch in range(1, args.epochs + 1):
         stats = train_one_epoch(model, train_data.train_loader, optimizer, args, epoch, wandb=wandb)
@@ -115,24 +160,56 @@ def main(args):
                 "epoch": epoch,
             })
 
+        if val_dataset is not None:
+            print(f"Validating CoOp on {args.val_dataset} at epoch {epoch}...")
+            val_results = eval_coop_single_dataset(model, val_dataset, args)
+            val_top1 = val_results.get("top1")
+            val_f1_macro = val_results.get("F1-macro_all")
+            val_score = get_validation_score(val_results, args.best_metric)
+            print(f"  {args.val_dataset} Top-1 accuracy: {val_top1:.4f}")
+            if val_f1_macro is not None:
+                print(f"  {args.val_dataset} F1-macro_all: {val_f1_macro:.4f}")
+            print(f"  {args.val_dataset} best metric {args.best_metric}: {val_score:.4f}")
+            if wandb is not None:
+                val_metrics = {
+                    f"val/{args.val_dataset}/top1": val_top1,
+                    f"val/{args.val_dataset}/{args.best_metric}": val_score,
+                    "epoch": epoch,
+                }
+                if val_f1_macro is not None:
+                    val_metrics[f"val/{args.val_dataset}/f1_macro"] = val_f1_macro
+                wandb.log(val_metrics)
+            if best_score is None or val_score > best_score:
+                best_score = val_score
+                best_epoch = epoch
+                save_prompt_learner(model, best_checkpoint_path, args, classnames)
+                print(
+                    f"Saved best CoOp prompt learner to {best_checkpoint_path} "
+                    f"(epoch {best_epoch}, {args.best_metric}={best_score:.4f})"
+                )
+                if wandb is not None:
+                    wandb.log({
+                        "val/best_epoch": best_epoch,
+                        f"val/best_{args.best_metric}": best_score,
+                    })
+
     if args.save is not None:
-        save_path = args.save
-        if os.path.isdir(save_path):
-            save_path = os.path.join(save_path, "coop_prompt_learner.pt")
+        save_path = resolve_save_path(args.save)
         save_prompt_learner(model, save_path, args, classnames)
         print(f"Saved CoOp prompt learner to {save_path}")
+
+    if args.eval_datasets is not None and best_epoch is not None and not args.no_load_best_for_eval:
+        load_prompt_learner(model, best_checkpoint_path, args.device)
+        print(
+            f"Loaded best CoOp prompt learner from {best_checkpoint_path} "
+            f"for final eval (epoch {best_epoch}, {args.best_metric}={best_score:.4f})"
+        )
 
     summary_rows = []
     if args.eval_datasets is not None:
         for dataset_name in args.eval_datasets:
             print(f"Evaluating CoOp on {dataset_name}...")
-            eval_dataset_class = getattr(datasets, dataset_name)
-            eval_dataset = eval_dataset_class(
-                clip_encoder.val_preprocess,
-                location=args.data_location,
-                batch_size=args.batch_size,
-                num_workers=args.workers,
-            )
+            eval_dataset = build_eval_dataset(dataset_name, clip_encoder, args)
             results = eval_coop_single_dataset(model, eval_dataset, args)
             top1 = results.get("top1")
             f1_macro = results.get("F1-macro_all")

@@ -182,7 +182,9 @@ class TrainStats:
 
 
 def save_prompt_learner(model, path, args, classnames):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
     prompt_learner = get_prompt_learner(model)
     torch.save({
         "prompt_learner": prompt_learner.state_dict(),
