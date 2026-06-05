@@ -1,0 +1,15 @@
+{
+  "id": "thanhquang71/poorfrogs-dg-clip",
+  "title": "PoorFrogs DG CLIP",
+  "code_file": "kaggle_main.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "dataset_sources": ["thanhquang71/iwildcam-v2-0-2020-wilds-dataset"],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

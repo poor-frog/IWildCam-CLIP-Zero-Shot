@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools==81.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "poorfrogs"
+version = "0.1.0"
+description = "Zero-shot CLIP evaluation on the WILDS IWildCam dataset."
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "braceexpand==0.1.7",
+    "ftfy==6.3.1",
+    "h5py==3.16.0",
+    "numpy==2.2.6",
+    "open-clip-torch==3.3.0",
+    "pandas==2.3.3",
+    "regex==2026.5.9",
+    "torch==2.12.0",
+    "torchvision==0.27.0",
+    "tqdm==4.67.3",
+    "wandb==0.27.0",
+    "webdataset==1.0.2",
+    "wilds==2.0.0",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "clip*"]
+exclude = ["tests*", "data*", "wandb*", "venv*", ".venv*"]
+
+[tool.setuptools.package-data]
+clip = ["bpe_simple_vocab_16e6.txt.gz"]
