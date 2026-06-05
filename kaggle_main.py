@@ -5,6 +5,10 @@ from pathlib import Path
 
 
 DEFAULT_KAGGLE_DATASET = "/kaggle/input/iwildcam-v2-0-2020-wilds-dataset"
+DEFAULT_KAGGLE_DATASET_CANDIDATES = [
+    DEFAULT_KAGGLE_DATASET,
+    "/kaggle/input/datasets/thanhquang71/iwildcam-v2-0-2020-wilds-dataset",
+]
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_GITHUB_REPO = "https://github.com/poor-frog/IWildCam-CLIP-Zero-Shot.git"
 DEFAULT_KAGGLE_WORKING_REPO = Path("/kaggle/working/IWildCam-CLIP-Zero-Shot")
@@ -115,6 +119,8 @@ def resolve_kaggle_data_location(repo_root, fallback_input_path=DEFAULT_KAGGLE_D
 
 def find_iwildcam_source_root(kaggle_dataset_path):
     source_root = Path(kaggle_dataset_path)
+    if not source_root.exists():
+        raise FileNotFoundError(f"IWildCam Kaggle dataset path does not exist: {source_root}")
     candidates = [
         source_root,
         source_root / "iwildcam_v2.0",
@@ -132,9 +138,28 @@ def find_iwildcam_source_root(kaggle_dataset_path):
     return source_root
 
 
-def prepare_iwildcam_layout(repo_root, kaggle_dataset_path=DEFAULT_KAGGLE_DATASET):
+def resolve_iwildcam_source_root(kaggle_dataset_candidates=None):
+    candidates = kaggle_dataset_candidates or DEFAULT_KAGGLE_DATASET_CANDIDATES
+    missing_paths = []
+    for candidate in candidates:
+        try:
+            return find_iwildcam_source_root(candidate)
+        except FileNotFoundError:
+            missing_paths.append(str(candidate))
+
+    raise FileNotFoundError(
+        "The IWildCam Kaggle dataset could not be found in any expected mount: "
+        + ", ".join(missing_paths)
+    )
+
+
+def prepare_iwildcam_layout(repo_root, kaggle_dataset_path=DEFAULT_KAGGLE_DATASET, kaggle_dataset_candidates=None):
     repo_root = Path(repo_root)
-    source_root = find_iwildcam_source_root(kaggle_dataset_path)
+    if kaggle_dataset_candidates is None and kaggle_dataset_path == DEFAULT_KAGGLE_DATASET:
+        candidates = DEFAULT_KAGGLE_DATASET_CANDIDATES
+    else:
+        candidates = [kaggle_dataset_path, *(kaggle_dataset_candidates or [])]
+    source_root = resolve_iwildcam_source_root(candidates)
     target_root = repo_root / "data" / "iwildcam_v2.0"
     target_root.mkdir(parents=True, exist_ok=True)
 

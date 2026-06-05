@@ -58,6 +58,47 @@ class KaggleMainTest(unittest.TestCase):
             self.assertTrue((target_dataset / "metadata.csv").exists())
             self.assertTrue((target_dataset / "train").exists())
 
+    def test_prepare_iwildcam_layout_falls_back_when_default_mount_is_missing(self):
+        from kaggle_main import prepare_iwildcam_layout
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            missing_default = Path(tmpdir) / "kaggle" / "input" / "iwildcam-v2-0-2020-wilds-dataset"
+            nested_root = Path(tmpdir) / "kaggle" / "input" / "datasets" / "thanhquang71" / "iwildcam-v2-0-2020-wilds-dataset"
+            source_dataset = nested_root / "iwildcam_v2.0"
+            source_dataset.mkdir(parents=True)
+            (source_dataset / "metadata.csv").write_text("metadata", encoding="utf-8")
+            (source_dataset / "train").mkdir()
+
+            data_location = prepare_iwildcam_layout(
+                repo_root,
+                missing_default,
+                kaggle_dataset_candidates=[nested_root],
+            )
+            target_dataset = Path(data_location) / "iwildcam_v2.0"
+
+            self.assertEqual(data_location, str(repo_root / "data"))
+            self.assertTrue((target_dataset / "metadata.csv").exists())
+            self.assertTrue((target_dataset / "train").exists())
+
+    def test_resolve_iwildcam_source_root_uses_default_kaggle_candidates(self):
+        import kaggle_main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            default_root = Path(tmpdir) / "missing-default"
+            nested_root = Path(tmpdir) / "datasets" / "thanhquang71" / "iwildcam-v2-0-2020-wilds-dataset"
+            source_dataset = nested_root / "iwildcam_v2.0"
+            source_dataset.mkdir(parents=True)
+            (source_dataset / "metadata.csv").write_text("metadata", encoding="utf-8")
+
+            original_candidates = kaggle_main.DEFAULT_KAGGLE_DATASET_CANDIDATES
+            try:
+                kaggle_main.DEFAULT_KAGGLE_DATASET_CANDIDATES = [str(default_root), str(nested_root)]
+
+                self.assertEqual(kaggle_main.resolve_iwildcam_source_root(), source_dataset)
+            finally:
+                kaggle_main.DEFAULT_KAGGLE_DATASET_CANDIDATES = original_candidates
+
     def test_build_coop_training_argv_uses_phase11_defaults(self):
         from kaggle_main import build_coop_training_argv
 
