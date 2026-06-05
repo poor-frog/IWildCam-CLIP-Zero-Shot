@@ -1,6 +1,6 @@
 {
-  "id": "thanhquang71/poorfrogs-dg-clip",
-  "title": "PoorFrogs DG CLIP",
+  "id": "thanhquang71/PoorFrogs-CLIP-IWildCam",
+  "title": "PoorFrogs DG CLIP IWildCam",
   "code_file": "kaggle_main.py",
   "language": "python",
   "kernel_type": "script",
@@ -13,3 +13,4 @@
   "kernel_sources": [],
   "model_sources": []
 }
+

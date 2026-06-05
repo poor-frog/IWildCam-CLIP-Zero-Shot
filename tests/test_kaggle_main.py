@@ -38,6 +38,32 @@ class KaggleMainTest(unittest.TestCase):
             resolved = resolve_kaggle_data_location(str(repo_root), "/kaggle/input/some-dataset")
             self.assertEqual(resolved, "/kaggle/input/some-dataset")
 
+    def test_build_coop_training_argv_uses_phase11_defaults(self):
+        from kaggle_main import build_coop_training_argv
+
+        argv = build_coop_training_argv("./data")
+
+        self.assertEqual(argv[0], "kaggle_main.py")
+        self.assertIn("--model=ViT-B/32", argv)
+        self.assertIn("--train-dataset=IWildCam", argv)
+        self.assertIn("--eval-datasets=IWildCamIDVal,IWildCamID,IWildCamOOD", argv)
+        self.assertIn("--data-location=./data", argv)
+        self.assertIn("--epochs=50", argv)
+        self.assertIn("--best-metric=F1-macro_all", argv)
+        self.assertIn("--wandb-project=PoorFrogs", argv)
+        self.assertIn("--wandb-run-name=coop-vit-b32-phase11-best-f1", argv)
+        self.assertIn("--save=./checkpoints/coop_prompt_learner.pt", argv)
+
+    def test_build_coop_training_argv_preserves_user_overrides(self):
+        from kaggle_main import build_coop_training_argv
+
+        argv = build_coop_training_argv("./data", ["--epochs=1", "--wandb-run-name=debug"])
+
+        self.assertIn("--epochs=1", argv)
+        self.assertIn("--wandb-run-name=debug", argv)
+        self.assertNotIn("--epochs=50", argv)
+        self.assertNotIn("--wandb-run-name=coop-vit-b32-phase11-best-f1", argv)
+
 
 if __name__ == "__main__":
     unittest.main()
