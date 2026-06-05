@@ -113,24 +113,32 @@ def resolve_kaggle_data_location(repo_root, fallback_input_path=DEFAULT_KAGGLE_D
     return fallback_input_path
 
 
+def find_iwildcam_source_root(kaggle_dataset_path):
+    source_root = Path(kaggle_dataset_path)
+    candidates = [
+        source_root,
+        source_root / "iwildcam_v2.0",
+        source_root / "archive",
+        source_root / "archive" / "iwildcam_v2.0",
+    ]
+    for candidate in candidates:
+        if (candidate / "metadata.csv").exists():
+            return candidate
+
+    for metadata_path in source_root.rglob("metadata.csv"):
+        if metadata_path.parent.name == "iwildcam_v2.0":
+            return metadata_path.parent
+
+    return source_root
+
+
 def prepare_iwildcam_layout(repo_root, kaggle_dataset_path=DEFAULT_KAGGLE_DATASET):
     repo_root = Path(repo_root)
-    source_root = Path(kaggle_dataset_path)
+    source_root = find_iwildcam_source_root(kaggle_dataset_path)
     target_root = repo_root / "data" / "iwildcam_v2.0"
     target_root.mkdir(parents=True, exist_ok=True)
 
-    archive = source_root / "archive"
-    if archive.exists():
-        links = {
-            target_root / "archive": archive,
-            target_root / "train": archive / "train",
-            target_root / "metadata.csv": archive / "metadata.csv",
-        }
-    else:
-        links = {
-            target_root / "train": source_root / "train",
-            target_root / "metadata.csv": source_root / "metadata.csv",
-        }
+    links = {target_root / child.name: child for child in source_root.iterdir()}
 
     for link_path, source_path in links.items():
         if link_path.exists() or link_path.is_symlink() or not source_path.exists():

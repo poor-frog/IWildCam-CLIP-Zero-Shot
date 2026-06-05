@@ -40,6 +40,24 @@ class KaggleMainTest(unittest.TestCase):
             resolved = resolve_kaggle_data_location(str(repo_root), "/kaggle/input/some-dataset")
             self.assertEqual(resolved, "/kaggle/input/some-dataset")
 
+    def test_prepare_iwildcam_layout_uses_nested_iwildcam_mount(self):
+        from kaggle_main import prepare_iwildcam_layout
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            kaggle_root = Path(tmpdir) / "kaggle" / "input" / "datasets" / "thanhquang71" / "iwildcam-v2-0-2020-wilds-dataset"
+            source_dataset = kaggle_root / "iwildcam_v2.0"
+            source_dataset.mkdir(parents=True)
+            (source_dataset / "metadata.csv").write_text("metadata", encoding="utf-8")
+            (source_dataset / "train").mkdir()
+
+            data_location = prepare_iwildcam_layout(repo_root, kaggle_root)
+            target_dataset = Path(data_location) / "iwildcam_v2.0"
+
+            self.assertEqual(data_location, str(repo_root / "data"))
+            self.assertTrue((target_dataset / "metadata.csv").exists())
+            self.assertTrue((target_dataset / "train").exists())
+
     def test_build_coop_training_argv_uses_phase11_defaults(self):
         from kaggle_main import build_coop_training_argv
 
