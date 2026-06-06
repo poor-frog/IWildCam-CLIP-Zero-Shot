@@ -72,6 +72,13 @@ def parse_mode(argv):
     env_mode = os.environ.get("TRAIN_METHOD")
     if env_mode is not None:
         return env_mode
+    try:
+        from kaggle_secrets import UserSecretsClient
+        secret_mode = UserSecretsClient().get_secret("TRAIN_METHOD")
+        if secret_mode is not None:
+            return secret_mode
+    except Exception:
+        pass
     for index, arg in enumerate(argv):
         if arg == "--mode" and index + 1 < len(argv):
             return argv[index + 1]
