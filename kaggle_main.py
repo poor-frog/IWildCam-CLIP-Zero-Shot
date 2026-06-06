@@ -32,6 +32,25 @@ COOP_DEFAULTS = {
 }
 COOP_DEFAULT_FLAGS = ["--wandb"]
 
+FULL_MAPLE_DEFAULTS = {
+    "--model": "ViT-B/32",
+    "--train-dataset": "IWildCam",
+    "--eval-datasets": "IWildCamIDVal,IWildCamID,IWildCamOOD",
+    "--batch-size": "32",
+    "--workers": "4",
+    "--n-ctx": "2",
+    "--epochs": "15",
+    "--lr": "0.002",
+    "--wd": "1e-5",
+    "--val-dataset": "IWildCamIDVal",
+    "--best-metric": "F1-macro_all",
+    "--maple-prompt-depth": "9",
+    "--wandb-project": "PoorFrogs",
+    "--wandb-run-name": "maple-full-vit-b32",
+    "--save": "./checkpoints/maple_full_prompt_learner.pt",
+}
+FULL_MAPLE_DEFAULT_FLAGS = ["--wandb"]
+
 
 def strip_mode_args(argv):
     stripped = []
@@ -191,6 +210,24 @@ def build_coop_training_argv(data_location, user_args=None):
     return argv
 
 
+def build_full_maple_training_argv(data_location, user_args=None):
+    user_args = user_args or []
+    argv = ["kaggle_main.py"]
+    provided = _provided_option_names([argv[0], *user_args])
+
+    defaults = {**FULL_MAPLE_DEFAULTS, "--data-location": data_location}
+    for name, value in defaults.items():
+        if name not in provided:
+            argv.append(f"{name}={value}")
+
+    for flag in FULL_MAPLE_DEFAULT_FLAGS:
+        if flag not in provided and f"--no-{flag[2:]}" not in provided:
+            argv.append(flag)
+
+    argv.extend(user_args)
+    return argv
+
+
 def _ensure_deps():
     packages = [
         "braceexpand",
@@ -231,8 +268,8 @@ def main():
     configure_import_path(repo_root)
 
     mode = parse_mode(sys.argv)
-    if mode != "coop":
-        raise ValueError("This Kaggle entrypoint is for CoOp training. Use --mode=coop or omit --mode.")
+    if mode not in ("coop", "full_maple"):
+        raise ValueError(f"Unknown mode: {mode}. Use --mode=coop or --mode=full_maple.")
 
     _ensure_deps()
     _ensure_local_package_installed(repo_root)
@@ -240,15 +277,21 @@ def main():
     data_location = prepare_iwildcam_layout(repo_root)
 
     user_args = strip_mode_args(sys.argv)[1:]
-    sys.argv = build_coop_training_argv(data_location, user_args)
 
-    print("Running Kaggle CoOp training with arguments:")
-    print(" ".join(sys.argv[1:]))
-
-    from src.config import parse_arguments
-    from src.train_coop import main as run_coop
-
-    run_coop(parse_arguments())
+    if mode == "full_maple":
+        sys.argv = build_full_maple_training_argv(data_location, user_args)
+        print("Running Kaggle full MaPLe training with arguments:")
+        print(" ".join(sys.argv[1:]))
+        from src.config import parse_arguments
+        from src.train_maple_full import main as run_maple_full
+        run_maple_full(parse_arguments())
+    else:
+        sys.argv = build_coop_training_argv(data_location, user_args)
+        print("Running Kaggle CoOp training with arguments:")
+        print(" ".join(sys.argv[1:]))
+        from src.config import parse_arguments
+        from src.train_coop import main as run_coop
+        run_coop(parse_arguments())
 
 
 if __name__ == "__main__":

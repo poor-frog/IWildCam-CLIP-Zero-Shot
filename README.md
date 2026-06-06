@@ -142,6 +142,52 @@ KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_coop.py \
 
 During training, CoOp validates after every epoch on `--val-dataset` (default: `IWildCamIDVal`), saves the best prompt learner by `--best-metric` (default: `F1-macro_all` with `top1` fallback), and loads that best checkpoint before the final `--eval-datasets` report. With `--save=./checkpoints/coop_prompt_learner.pt`, the best checkpoint is written to `./checkpoints/coop_prompt_learner_best.pt`; use `--best-checkpoint=PATH` to override it or `--no-load-best-for-eval` to report the last epoch instead.
 
+The Phase 1.1 CoOp baseline results and checkpoint mapping are recorded in [`docs/results.md`](docs/results.md). Use `checkpoints/coop_training_vitb32_best_epoch13_f1_2573.pt` as the canonical Phase 1.1 checkpoint for reproduction and Phase 2 comparisons.
+
+### MaPLe Phase 2.1a
+
+Phase 2.1a adds shallow MaPLe-style multimodal prompting for OpenAI CLIP `ViT-B/32`. It learns text context tokens and shallow visual prompt tokens while keeping the CLIP backbone frozen. This is not full deep MaPLe yet; it is a low-risk test of whether visual prompts improve IWildCam macro-F1 compared with the CoOp Phase 1.1 baseline in [`docs/results.md`](docs/results.md).
+
+Smoke run:
+
+```bash
+KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_maple.py \
+    --model=ViT-B/32 \
+    --train-dataset=IWildCam \
+    --eval-datasets=IWildCamIDVal \
+    --data-location=./data \
+    --batch-size=4 \
+    --workers=0 \
+    --n-ctx=16 \
+    --ctx-init="a photo of a" \
+    --maple-vision-n-ctx=4 \
+    --epochs=1 \
+    --max-train-batches=1 \
+    --max-eval-batches=1
+```
+
+Full Phase 2.1a run:
+
+```bash
+KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_maple.py \
+    --model=ViT-B/32 \
+    --train-dataset=IWildCam \
+    --eval-datasets=IWildCamIDVal,IWildCamID,IWildCamOOD \
+    --data-location=./data \
+    --batch-size=32 \
+    --workers=4 \
+    --n-ctx=16 \
+    --ctx-init="a photo of a" \
+    --maple-vision-n-ctx=4 \
+    --epochs=15 \
+    --lr=0.002 \
+    --wd=1e-5 \
+    --wandb \
+    --wandb-project=PoorFrogs \
+    --wandb-run-name=maple-shallow-vit-b32-phase21a \
+    --save=./checkpoints/maple_prompt_learner.pt
+```
+
 Evaluate a saved best checkpoint without more training:
 
 ```bash
