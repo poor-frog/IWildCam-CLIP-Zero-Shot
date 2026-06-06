@@ -69,6 +69,9 @@ def strip_mode_args(argv):
 
 
 def parse_mode(argv):
+    env_mode = os.environ.get("TRAIN_METHOD")
+    if env_mode is not None:
+        return env_mode
     for index, arg in enumerate(argv):
         if arg == "--mode" and index + 1 < len(argv):
             return argv[index + 1]
