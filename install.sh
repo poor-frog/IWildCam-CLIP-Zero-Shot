@@ -7,49 +7,41 @@ cd "$SCRIPT_DIR"
 VENV_DIR="${VENV_DIR:-.venv}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.10}"
 
-PACKAGES=(
-  open_clip_torch
-  torch
-  torchvision
-  wilds
-  braceexpand
-  webdataset
-  h5py
-  ftfy
-  regex
-  tqdm
-  numpy
-  wandb
-)
+if [[ ! -f "pyproject.toml" ]]; then
+  echo "Error: pyproject.toml not found in $SCRIPT_DIR" >&2
+  exit 1
+fi
+
+if [[ ! -f "uv.lock" ]]; then
+  echo "Error: uv.lock not found. Run 'uv lock' first to create the locked environment." >&2
+  exit 1
+fi
 
 if [[ ! -d "clip" ]]; then
   echo "Error: local OpenAI CLIP package directory not found: $SCRIPT_DIR/clip" >&2
   exit 1
 fi
 
-if command -v uv >/dev/null 2>&1; then
-  uv venv "$VENV_DIR" --python "$PYTHON_VERSION"
-  # shellcheck disable=SC1091
-  source "$VENV_DIR/bin/activate"
-  uv pip install "${PACKAGES[@]}"
-  uv pip install -e clip
-else
-  PYTHON_BIN="python3"
-  if command -v "python$PYTHON_VERSION" >/dev/null 2>&1; then
-    PYTHON_BIN="python$PYTHON_VERSION"
-  fi
-
-  "$PYTHON_BIN" -m venv "$VENV_DIR"
-  # shellcheck disable=SC1091
-  source "$VENV_DIR/bin/activate"
-  python -m pip install --upgrade pip
-  python -m pip install "${PACKAGES[@]}"
-  python -m pip install -e clip
+if ! command -v uv >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+Error: uv is required for reproducible locked installs.
+Install uv first, for example:
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+EOF
+  exit 1
 fi
+
+echo "Installing locked PoorFrogs environment into $VENV_DIR using Python $PYTHON_VERSION..."
+UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --locked --python "$PYTHON_VERSION"
+
+# shellcheck disable=SC1091
+source "$VENV_DIR/bin/activate"
 
 cat <<EOF
 
 === Setup complete ===
+
+Environment was installed from uv.lock.
 
 Activate:
   source $VENV_DIR/bin/activate
