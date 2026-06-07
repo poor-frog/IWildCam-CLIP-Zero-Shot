@@ -39,7 +39,7 @@ FULL_MAPLE_DEFAULTS = {
     "--batch-size": "32",
     "--workers": "4",
     "--n-ctx": "2",
-    "--epochs": "15",
+    "--epochs": "9",
     "--lr": "0.002",
     "--wd": "1e-5",
     "--val-dataset": "IWildCamIDVal",
