@@ -242,7 +242,7 @@ def train_one_epoch(model, dataloader, optimizer, args, epoch, wandb=None):
     return TrainStats(epoch=epoch, loss=total_loss / total_seen, accuracy=total_correct / total_seen)
 
 
-def eval_coop_single_dataset(model, dataset, args):
+def eval_coop_single_dataset(model, dataset, args, desc="CoOp eval"):
     model.eval()
     loader = dataset.test_loader
     correct = 0
@@ -252,7 +252,7 @@ def eval_coop_single_dataset(model, dataset, args):
     all_metadata = []
 
     with torch.no_grad():
-        for batch_index, data in enumerate(tqdm(loader, desc="CoOp eval")):
+        for batch_index, data in enumerate(tqdm(loader, desc=desc)):
             if args.max_eval_batches is not None and batch_index >= args.max_eval_batches:
                 break
             data = maybe_dictionarize(data)

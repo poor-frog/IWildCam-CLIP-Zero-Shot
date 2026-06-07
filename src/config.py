@@ -77,9 +77,8 @@ def parse_arguments():
     parser.add_argument("--best-metric", type=str, default="F1-macro_all", help="Validation metric used to select the best CoOp checkpoint; falls back to top1 when missing.")
     parser.add_argument("--best-checkpoint", type=str, default=None, help="Optional path for the best CoOp checkpoint.")
     parser.add_argument("--no-load-best-for-eval", action="store_true", help="Skip loading the best CoOp checkpoint before final eval.")
-    parser.add_argument("--maple-vision-n-ctx", type=int, default=4, help="Number of shallow MaPLe visual context tokens.")
-    parser.add_argument("--maple-precision", type=str, default="fp32", choices=["fp32"], help="Precision mode for Phase 2.1a MaPLe.")
-    parser.add_argument("--maple-prompt-depth", type=int, default=9, help="Full MaPLe prompt depth; 1 means shallow coupled prompts, >1 adds deep compound prompts.")
+    parser.add_argument("--maple-precision", type=str, default="fp32", choices=["fp32"], help="Precision mode for MaPLe.")
+    parser.add_argument("--maple-prompt-depth", type=int, default=9, help="MaPLe prompt depth; 1 means shallow coupled prompts, >1 adds deep compound prompts.")
 
     parsed_args = parser.parse_args()
     if torch.cuda.is_available():

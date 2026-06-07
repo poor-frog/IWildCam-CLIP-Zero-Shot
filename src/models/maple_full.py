@@ -242,4 +242,4 @@ def train_full_maple_one_epoch(model, dataloader, optimizer, args, epoch, wandb=
 
 def eval_full_maple_single_dataset(model, dataset, args):
     from src.models.coop import eval_coop_single_dataset
-    return eval_coop_single_dataset(model, dataset, args)
+    return eval_coop_single_dataset(model, dataset, args, desc="MaPLe eval")

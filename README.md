@@ -144,48 +144,46 @@ During training, CoOp validates after every epoch on `--val-dataset` (default: `
 
 The Phase 1.1 CoOp baseline results and checkpoint mapping are recorded in [`docs/results.md`](docs/results.md). Use `checkpoints/coop_training_vitb32_best_epoch13_f1_2573.pt` as the canonical Phase 1.1 checkpoint for reproduction and Phase 2 comparisons.
 
-### MaPLe Phase 2.1a
+### MaPLe
 
-Phase 2.1a adds shallow MaPLe-style multimodal prompting for OpenAI CLIP `ViT-B/32`. It learns text context tokens and shallow visual prompt tokens while keeping the CLIP backbone frozen. This is not full deep MaPLe yet; it is a low-risk test of whether visual prompts improve IWildCam macro-F1 compared with the CoOp Phase 1.1 baseline in [`docs/results.md`](docs/results.md).
+MaPLe adds deep coupled prompts at every transformer block (text + vision) for OpenAI CLIP `ViT-B/32` while keeping the CLIP backbone frozen. Use it as the primary MaPLe path for comparisons against the CoOp Phase 1.1 baseline in [`docs/results.md`](docs/results.md).
 
 Smoke run:
 
 ```bash
-KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_maple.py \
+KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_maple_full.py \
     --model=ViT-B/32 \
     --train-dataset=IWildCam \
     --eval-datasets=IWildCamIDVal \
     --data-location=./data \
-    --batch-size=4 \
+    --batch-size=2 \
     --workers=0 \
-    --n-ctx=16 \
-    --ctx-init="a photo of a" \
-    --maple-vision-n-ctx=4 \
+    --n-ctx=2 \
+    --maple-prompt-depth=2 \
     --epochs=1 \
     --max-train-batches=1 \
     --max-eval-batches=1
 ```
 
-Full Phase 2.1a run:
+Full MaPLe run:
 
 ```bash
-KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_maple.py \
+KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_maple_full.py \
     --model=ViT-B/32 \
     --train-dataset=IWildCam \
     --eval-datasets=IWildCamIDVal,IWildCamID,IWildCamOOD \
     --data-location=./data \
     --batch-size=32 \
     --workers=4 \
-    --n-ctx=16 \
-    --ctx-init="a photo of a" \
-    --maple-vision-n-ctx=4 \
-    --epochs=15 \
+    --n-ctx=2 \
+    --maple-prompt-depth=9 \
+    --epochs=9 \
     --lr=0.002 \
     --wd=1e-5 \
     --wandb \
     --wandb-project=PoorFrogs \
-    --wandb-run-name=maple-shallow-vit-b32-phase21a \
-    --save=./checkpoints/maple_prompt_learner.pt
+    --wandb-run-name=maple-vit-b32 \
+    --save=./checkpoints/maple_full_prompt_learner.pt
 ```
 
 Evaluate a saved best checkpoint without more training:
@@ -275,7 +273,9 @@ src/
     ├── zeroshot.py              # Zero-shot classification head builder
     └── eval.py                  # Evaluation loop
 scripts/
-└── prepare_iwildcam.py          # Dataset CSV preparation
+├── prepare_iwildcam.py          # Dataset CSV preparation
+├── train_coop.sh                # CoOp training helper
+└── train_maple.sh               # MaPLe training helper
 clip/                            # OpenAI CLIP (local package)
 .venv/                           # Virtual environment created by install.sh
 ```

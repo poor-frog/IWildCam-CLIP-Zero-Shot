@@ -66,19 +66,6 @@ For Phase 2, compare against the CoOp Phase 1.1 baseline above using:
 
 Do not treat a Phase 2 run as better if it only improves Top-1 while reducing macro F1, because IWildCam is class-imbalanced and macro F1 better reflects rare-class behavior.
 
-## MaPLe Phase 2.1a Baseline
-
-Phase 2.1a is the next planned comparison against CoOp Phase 1.1. It uses shallow MaPLe-style multimodal prompting on the same OpenAI CLIP `ViT-B/32` backbone, adding learnable visual prompt tokens while keeping the CLIP backbone frozen.
-
-A Phase 2.1a run should be considered promising only if it improves `IWildCamIDVal F1-macro_all` above 25.73% or `IWildCamOOD F1-macro_all` above 18.63% without a severe Top-1 regression.
-
-Planned canonical checkpoint names:
-
-| Artifact | Meaning |
-| -------- | ------- |
-| `checkpoints/maple_prompt_learner_best.pt` | Best shallow MaPLe checkpoint selected by `IWildCamIDVal F1-macro_all` |
-| `checkpoints/maple_prompt_learner.pt` | Last-epoch shallow MaPLe checkpoint |
-
 ## MaPLe
 
 MaPLe adds deep coupled prompts at every transformer block (text + vision) via a vendored MaPLe CLIP backend. The pipeline smoke test passed locally (1 train batch + 1 eval batch, no crash). Ready for Kaggle training.
@@ -94,7 +81,7 @@ Same environment as Phase 1.1 CoOp (Kaggle Tesla P100 16GB).
 | Method | MaPLe (deep coupled prompts) |
 | Context tokens | `n_ctx=2` per block |
 | Prompt depth | `maple-prompt-depth=9` (all ViT-B/32 transformer blocks) |
-| Epochs | 15 |
+| Epochs | 9 |
 | Learning rate | `0.002` |
 | Weight decay | `1e-5` |
 | Validation split | `IWildCamIDVal` |
