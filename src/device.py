@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 
 
@@ -23,8 +25,25 @@ def is_xla_device(device):
     return str(device).startswith("xla")
 
 
+def _cuda_is_usable():
+    """Check whether CUDA is both available AND the GPU is compatible with the installed PyTorch build.
+
+    On Kaggle the pre-installed PyTorch only supports sm_70+ but the allocated GPU
+    may be a Tesla P100 (sm_60).  torch.cuda.is_available() still returns True in
+    that case, so we do a tiny real kernel launch to confirm compatibility.
+    """
+    if not torch.cuda.is_available():
+        return False
+    try:
+        torch.zeros(1, device="cuda")
+        return True
+    except (RuntimeError, torch.AcceleratorError) as exc:
+        warnings.warn(f"CUDA device found but is not usable by this PyTorch build: {exc}")
+        return False
+
+
 def select_default_device():
-    if torch.cuda.is_available():
+    if _cuda_is_usable():
         return "cuda"
     if torch.backends.mps.is_available():
         return "mps"
