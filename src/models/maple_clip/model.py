@@ -6,6 +6,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from src.device import cast_prompt_like
+
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -235,7 +237,8 @@ class ResidualAttentionBlock_IVLP(nn.Module):
                 # Remove the outputs produced by learnable tokens of previous layer
                 prefix = x[0:x.shape[0] - self.n_ctx_visual, :, :]
                 # Create/configure learnable tokens of this layer
-                visual_context = self.VPT_shallow.expand(x.shape[1], -1, -1).permute(1, 0, 2).half()
+                visual_context = self.VPT_shallow.expand(x.shape[1], -1, -1).permute(1, 0, 2)
+                visual_context = cast_prompt_like(visual_context, x)
                 # Add the learnable tokens of this layer with the input, by replacing the previous
                 # layer learnable tokens
                 x = torch.cat([prefix, visual_context], dim=0)
@@ -246,7 +249,8 @@ class ResidualAttentionBlock_IVLP(nn.Module):
                 prefix = x[:1, :, :]
                 suffix = x[1 + self.n_ctx_text:, :, :]
                 # Create/configure learnable tokens of this layer
-                textual_context = self.VPT_shallow.expand(x.shape[1], -1, -1).permute(1, 0, 2).half()
+                textual_context = self.VPT_shallow.expand(x.shape[1], -1, -1).permute(1, 0, 2)
+                textual_context = cast_prompt_like(textual_context, x)
                 # Add the learnable tokens of this layer with the input, replaced by previous
                 # layer learnable tokens
                 x = torch.cat([prefix, textual_context, suffix], dim=0)
@@ -303,7 +307,8 @@ class ResidualAttentionBlock_MaPLe(nn.Module):
                         prefix = x[0:x.shape[0] - self.compound_prompt_nctx, :, :]
                         # Create/configure learnable tokens of this layer
                         visual_context = compound_prompts_deeper[counter]  # extract the correct index
-                        visual_context = visual_context.expand(x.shape[1], -1, -1).permute(1, 0, 2).half()
+                        visual_context = visual_context.expand(x.shape[1], -1, -1).permute(1, 0, 2)
+                        visual_context = cast_prompt_like(visual_context, x)
                         # Add the learnable tokens of this layer with the input, by replacing previous
                         # layer learnable tokens
                         x = torch.cat([prefix, visual_context], dim=0)
@@ -320,7 +325,8 @@ class ResidualAttentionBlock_MaPLe(nn.Module):
                         suffix = x[1 + self.compound_prompt_nctx:, :, :]
                         # Create/configure learnable tokens of this layer
                         textual_context = compound_prompts_deeper[counter]
-                        textual_context = textual_context.expand(x.shape[1], -1, -1).permute(1, 0, 2).half()
+                        textual_context = textual_context.expand(x.shape[1], -1, -1).permute(1, 0, 2)
+                        textual_context = cast_prompt_like(textual_context, x)
                         # Add the learnable tokens of this layer with the input, replaced by previous
                         # layer learnable tokens
                         x = torch.cat([prefix, textual_context, suffix], dim=0)
@@ -402,7 +408,7 @@ class VisionTransformer(nn.Module):
         # After positional embeddings, we will attach prompts with the model, remember only those
         # are trainable parameters here in whole image encoder.
         if self.VPT_shallow:
-            visual_ctx = self.VPT.expand(x.shape[0], -1, -1).half()
+            visual_ctx = cast_prompt_like(self.VPT.expand(x.shape[0], -1, -1), x)
             x = torch.cat([x, visual_ctx], dim=1)
         else:
             assert self.prompt_till_layer_visual == 0
@@ -454,7 +460,7 @@ class VisionTransformer_MaPLe(nn.Module):
         # After positional embeddings, we will attach prompts with the model, remember only those
         # are trainable parameters here in whole image encoder.
         if self.VPT_shallow:
-            visual_ctx = shared_ctx.expand(x.shape[0], -1, -1).half()
+            visual_ctx = cast_prompt_like(shared_ctx.expand(x.shape[0], -1, -1), x)
             x = torch.cat([x, visual_ctx], dim=1)
         else:
             assert self.prompt_till_layer_visual == 0
@@ -630,21 +636,21 @@ class CLIP(nn.Module):
 def convert_weights(model: nn.Module):
     """Convert applicable model parameters to fp16"""
 
-    def _convert_weights_to_fp16(l):
-        if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Linear)):
-            l.weight.data = l.weight.data.half()
-            if l.bias is not None:
-                l.bias.data = l.bias.data.half()
+    def _convert_weights_to_fp16(layer):
+        if isinstance(layer, (nn.Conv1d, nn.Conv2d, nn.Linear)):
+            layer.weight.data = layer.weight.data.half()
+            if layer.bias is not None:
+                layer.bias.data = layer.bias.data.half()
 
-        if isinstance(l, nn.MultiheadAttention):
+        if isinstance(layer, nn.MultiheadAttention):
             for attr in [*[f"{s}_proj_weight" for s in ["in", "q", "k", "v"]], "in_proj_bias", "bias_k", "bias_v"]:
-                tensor = getattr(l, attr)
+                tensor = getattr(layer, attr)
                 if tensor is not None:
                     tensor.data = tensor.data.half()
 
         for name in ["text_projection", "proj"]:
-            if hasattr(l, name):
-                attr = getattr(l, name)
+            if hasattr(layer, name):
+                attr = getattr(layer, name)
                 if attr is not None:
                     attr.data = attr.data.half()
 
@@ -676,7 +682,7 @@ def build_model(state_dict: dict, design_details):
     vocab_size = state_dict["token_embedding.weight"].shape[0]
     transformer_width = state_dict["ln_final.weight"].shape[0]
     transformer_heads = transformer_width // 64
-    transformer_layers = len(set(k.split(".")[2] for k in state_dict if k.startswith(f"transformer.resblocks")))
+    transformer_layers = len(set(k.split(".")[2] for k in state_dict if k.startswith("transformer.resblocks")))
 
     model = CLIP(
         embed_dim,
@@ -691,7 +697,7 @@ def build_model(state_dict: dict, design_details):
     convert_weights(model)
     try:
         model.load_state_dict(state_dict)
-    except:
+    except RuntimeError:
         missing_keys, _ = model.load_state_dict(state_dict, strict=False)
         print('Weights not found for some missing keys: ', missing_keys)
     return model.eval()

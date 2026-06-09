@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 import clip.clip as clip
 from src.datasets.dataloader import maybe_dictionarize
+from src.device import optimizer_step
 
 
 OPENAI_CLIP_MODELS = {"RN50", "RN101", "RN50x4", "RN50x16", "RN50x64", "ViT-B/32", "ViT-B/16", "ViT-L/14"}
@@ -225,7 +226,7 @@ def train_one_epoch(model, dataloader, optimizer, args, epoch, wandb=None):
         for name, param in model.named_parameters():
             if param.grad is not None and not torch.isfinite(param.grad).all():
                 raise FloatingPointError(f"CoOp produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
-        optimizer.step()
+        optimizer_step(optimizer, args.device)
 
         batch_size = labels.shape[0]
         total_loss += loss.item() * batch_size

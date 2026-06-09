@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch
 
@@ -37,6 +38,81 @@ class DummyOpenCLIP(torch.nn.Module):
 
 
 class CoOpModuleTest(unittest.TestCase):
+    def test_device_selection_keeps_cuda_mps_priority_and_uses_xla_before_cpu(self):
+        from src.device import select_default_device
+
+        with patch("src.device.get_xla_device", return_value="xla:0"), \
+             patch("torch.cuda.is_available", return_value=True), \
+             patch("torch.backends.mps.is_available", return_value=True):
+            self.assertEqual(select_default_device(), "cuda")
+
+        with patch("src.device.get_xla_device", return_value="xla:0"), \
+             patch("torch.cuda.is_available", return_value=False), \
+             patch("torch.backends.mps.is_available", return_value=True):
+            self.assertEqual(select_default_device(), "mps")
+
+        with patch("src.device.get_xla_device", return_value="xla:0"), \
+             patch("torch.cuda.is_available", return_value=False), \
+             patch("torch.backends.mps.is_available", return_value=False):
+            self.assertEqual(select_default_device(), "xla:0")
+
+    def test_device_selection_falls_back_to_cuda_mps_cpu_without_xla(self):
+        from src.device import select_default_device
+
+        with patch("src.device.get_xla_device", return_value=None), \
+             patch("torch.cuda.is_available", return_value=True):
+            self.assertEqual(select_default_device(), "cuda")
+
+        with patch("src.device.get_xla_device", return_value=None), \
+             patch("torch.cuda.is_available", return_value=False), \
+             patch("torch.backends.mps.is_available", return_value=True):
+            self.assertEqual(select_default_device(), "mps")
+
+        with patch("src.device.get_xla_device", return_value=None), \
+             patch("torch.cuda.is_available", return_value=False), \
+             patch("torch.backends.mps.is_available", return_value=False):
+            self.assertEqual(select_default_device(), "cpu")
+
+    def test_resolve_device_choice_supports_explicit_xla_and_existing_devices(self):
+        from src.device import resolve_device_choice
+
+        with patch("src.device.get_xla_device", return_value="xla:0"):
+            self.assertEqual(resolve_device_choice("xla"), "xla:0")
+
+        self.assertEqual(resolve_device_choice("cuda"), "cuda")
+        self.assertEqual(resolve_device_choice("mps"), "mps")
+        self.assertEqual(resolve_device_choice("cpu"), "cpu")
+
+        with patch("src.device.get_xla_device", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "torch_xla"):
+                resolve_device_choice("xla")
+
+    def test_optimizer_step_uses_xla_helper_only_for_xla_devices(self):
+        from src.device import optimizer_step
+
+        optimizer = SimpleNamespace(step=unittest.mock.Mock())
+        xla_model = SimpleNamespace(
+            optimizer_step=unittest.mock.Mock(),
+            mark_step=unittest.mock.Mock(),
+        )
+
+        with patch("src.device.get_xla_model", return_value=xla_model):
+            optimizer_step(optimizer, "xla:0")
+
+        xla_model.optimizer_step.assert_called_once_with(optimizer)
+        xla_model.mark_step.assert_called_once_with()
+        optimizer.step.assert_not_called()
+
+        optimizer = SimpleNamespace(step=unittest.mock.Mock())
+        with patch("src.device.get_xla_model", return_value=xla_model):
+            optimizer_step(optimizer, "cuda")
+        optimizer.step.assert_called_once_with()
+
+    def test_xla_device_skips_torch_data_parallel_policy(self):
+        from src.models.coop import should_use_data_parallel
+
+        self.assertFalse(should_use_data_parallel("xla:0", 8, disabled=False))
+
     def test_validation_score_prefers_requested_metric_and_falls_back_to_top1(self):
         from src.train_coop import get_validation_score
 

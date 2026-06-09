@@ -1,6 +1,7 @@
 import os
 import argparse
-import torch
+
+from src.device import resolve_device_choice
 
 
 def parse_arguments():
@@ -58,6 +59,13 @@ def parse_arguments():
         help="Directory for caching features and encoder.",
     )
     parser.add_argument("--workers", type=int, default=16)
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "cuda", "mps", "cpu", "xla"],
+        help="Training device. 'auto' preserves the default priority: CUDA, MPS, TPU/XLA, then CPU.",
+    )
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
     parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases logging.")
     parser.add_argument("--wandb-project", type=str, default="PoorFrogs")
@@ -79,12 +87,12 @@ def parse_arguments():
     parser.add_argument("--no-load-best-for-eval", action="store_true", help="Skip loading the best CoOp checkpoint before final eval.")
     parser.add_argument("--maple-precision", type=str, default="fp32", choices=["fp32"], help="Precision mode for MaPLe.")
     parser.add_argument("--maple-prompt-depth", type=int, default=9, help="MaPLe prompt depth; 1 means shallow coupled prompts, >1 adds deep compound prompts.")
+    parser.add_argument("--maple-lora-rank", type=int, default=0, help="Optional MaPLe LoRA rank; 0 disables LoRA.")
+    parser.add_argument("--maple-lora-alpha", type=int, default=None, help="Optional MaPLe LoRA alpha; defaults to 2 * rank when omitted.")
+    parser.add_argument("--maple-lora-dropout", type=float, default=0.0, help="Reserved for optional MaPLe LoRA adapters; currently must remain 0.0 for out_proj weight parametrization.")
+    parser.add_argument("--maple-lora-target", type=str, default="vision_out_proj", choices=["vision_out_proj"], help="Optional MaPLe LoRA target modules.")
+    parser.add_argument("--maple-lora-layers", type=str, default="last6", help="Optional MaPLe LoRA layer selection: 'lastN' or 'all'.")
 
     parsed_args = parser.parse_args()
-    if torch.cuda.is_available():
-        parsed_args.device = "cuda"
-    elif torch.backends.mps.is_available():
-        parsed_args.device = "mps"
-    else:
-        parsed_args.device = "cpu"
+    parsed_args.device = resolve_device_choice(parsed_args.device)
     return parsed_args

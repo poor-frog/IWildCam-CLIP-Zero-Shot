@@ -15,13 +15,23 @@ from src.models.maple_full import (
     CustomFullMaPLeCLIP,
     build_maple_design_details,
     eval_full_maple_single_dataset,
-    get_full_maple_prompt_learner,
     load_full_maple_prompt_learner,
     save_full_maple_prompt_learner,
     train_full_maple_one_epoch,
 )
 from src.train_coop import build_eval_dataset, get_validation_score, log_wandb_summary
-from src.train_maple import print_summary
+
+
+def print_summary(summary_rows):
+    if not summary_rows:
+        return
+    print("\n=== Full MaPLe Summary ===")
+    print("| Split         | Top-1  | F1-macro |")
+    print("| ------------- | ------ | -------- |")
+    for dataset_name, top1, f1_macro in summary_rows:
+        top1_text = f"{top1 * 100:.2f}%" if top1 is not None else "N/A"
+        f1_text = f"{f1_macro * 100:.2f}%" if f1_macro is not None else "N/A"
+        print(f"| {dataset_name:<13} | {top1_text:<6} | {f1_text:<8} |")
 
 
 def init_wandb(args):
@@ -36,7 +46,7 @@ def init_wandb(args):
         "project": args.wandb_project,
         "config": {
             **vars(args),
-            "method": "maple_full",
+            "method": getattr(args, "training_method", "maple_full"),
             "system_hostname": socket.gethostname(),
             "system_user": getpass.getuser(),
         },
@@ -96,7 +106,8 @@ def main(args):
     if args.load is not None:
         load_full_maple_prompt_learner(model, args.load, args.device)
 
-    optimizer = torch.optim.AdamW(get_full_maple_prompt_learner(model).parameters(), lr=args.lr, weight_decay=args.wd)
+    trainable_parameters = [param for param in model.parameters() if param.requires_grad]
+    optimizer = torch.optim.AdamW(trainable_parameters, lr=args.lr, weight_decay=args.wd)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
     wandb = init_wandb(args)
     best_score = None

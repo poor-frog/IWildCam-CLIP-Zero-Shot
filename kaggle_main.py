@@ -51,6 +51,16 @@ FULL_MAPLE_DEFAULTS = {
 }
 FULL_MAPLE_DEFAULT_FLAGS = ["--wandb"]
 
+MAPLE_LORA_DEFAULTS = {
+    **FULL_MAPLE_DEFAULTS,
+    "--maple-lora-rank": "8",
+    "--maple-lora-alpha": "16",
+    "--maple-lora-layers": "last6",
+    "--wandb-run-name": "maple-lora-vit-b32-r8-last6",
+    "--save": "./checkpoints/maple_lora_r8_last6.pt",
+}
+MAPLE_LORA_DEFAULT_FLAGS = ["--wandb"]
+
 
 def strip_mode_args(argv):
     stripped = []
@@ -238,6 +248,24 @@ def build_full_maple_training_argv(data_location, user_args=None):
     return argv
 
 
+def build_maple_lora_training_argv(data_location, user_args=None):
+    user_args = user_args or []
+    argv = ["kaggle_main.py"]
+    provided = _provided_option_names([argv[0], *user_args])
+
+    defaults = {**MAPLE_LORA_DEFAULTS, "--data-location": data_location}
+    for name, value in defaults.items():
+        if name not in provided:
+            argv.append(f"{name}={value}")
+
+    for flag in MAPLE_LORA_DEFAULT_FLAGS:
+        if flag not in provided and f"--no-{flag[2:]}" not in provided:
+            argv.append(flag)
+
+    argv.extend(user_args)
+    return argv
+
+
 def _ensure_deps():
     packages = [
         "braceexpand",
@@ -253,23 +281,24 @@ def _ensure_deps():
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", *packages])
 
 
-def _ensure_local_package_installed(repo_root):
+def _ensure_local_package_installed(repo_root, check_call=subprocess.check_call):
     if not is_project_root(repo_root):
         return
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-e", str(repo_root)])
+    check_call([sys.executable, "-m", "pip", "install", "-q", "-e", str(repo_root), "--no-deps"])
 
 
 def _configure_wandb_from_kaggle_secret():
     if os.environ.get("WANDB_API_KEY"):
-        return
+        return True
     try:
         from kaggle_secrets import UserSecretsClient
     except ImportError:
-        return
+        return False
     try:
         os.environ["WANDB_API_KEY"] = UserSecretsClient().get_secret("WANDB_API_KEY")
     except Exception:
-        return
+        return False
+    return bool(os.environ.get("WANDB_API_KEY"))
 
 
 def main():
@@ -278,8 +307,8 @@ def main():
     configure_import_path(repo_root)
 
     mode = parse_mode(sys.argv)
-    if mode not in ("coop", "full_maple"):
-        raise ValueError(f"Unknown mode: {mode}. Use --mode=coop or --mode=full_maple.")
+    if mode not in ("coop", "full_maple", "maple_lora"):
+        raise ValueError(f"Unknown mode: {mode}. Use --mode=coop, --mode=full_maple, or --mode=maple_lora.")
 
     _ensure_deps()
     _ensure_local_package_installed(repo_root)
@@ -295,6 +324,14 @@ def main():
         from src.config import parse_arguments
         from src.train_maple_full import main as run_maple_full
         run_maple_full(parse_arguments())
+    elif mode == "maple_lora":
+        sys.argv = build_maple_lora_training_argv(data_location, user_args)
+        print("Running Kaggle MaPLe + LoRA training with arguments:")
+        print(" ".join(sys.argv[1:]))
+        from src.config import parse_arguments
+        from src.train_maple_lora import configure_maple_lora_args
+        from src.train_maple_full import main as run_maple_full
+        run_maple_full(configure_maple_lora_args(parse_arguments()))
     else:
         sys.argv = build_coop_training_argv(data_location, user_args)
         print("Running Kaggle CoOp training with arguments:")

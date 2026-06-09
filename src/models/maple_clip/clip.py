@@ -144,9 +144,10 @@ def load(
         state_dict = torch.load(model_path, map_location="cpu")
 
     if not jit:
-        model = build_model(state_dict or model.state_dict(), design_details or default_design_details()).to(device)
-        if str(device) == "cpu":
+        model = build_model(state_dict or model.state_dict(), design_details or default_design_details())
+        if str(device) == "cpu" or str(device).startswith("xla"):
             model.float()
+        model = model.to(device)
         return model, _transform(model.visual.input_resolution)
 
     # patch the device names

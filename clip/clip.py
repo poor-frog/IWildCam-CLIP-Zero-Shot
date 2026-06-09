@@ -136,9 +136,10 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
             state_dict = torch.load(opened_file, map_location="cpu")
 
     if not jit:
-        model = build_model(state_dict or model.state_dict()).to(device)
-        if str(device) == "cpu":
+        model = build_model(state_dict or model.state_dict())
+        if str(device) == "cpu" or str(device).startswith("xla"):
             model.float()
+        model = model.to(device)
         return model, _transform(model.visual.input_resolution)
 
     # patch the device names

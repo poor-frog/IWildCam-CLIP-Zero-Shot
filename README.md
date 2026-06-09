@@ -144,6 +144,26 @@ During training, CoOp validates after every epoch on `--val-dataset` (default: `
 
 The Phase 1.1 CoOp baseline results and checkpoint mapping are recorded in [`docs/results.md`](docs/results.md). Use `checkpoints/coop_training_vitb32_best_epoch13_f1_2573.pt` as the canonical Phase 1.1 checkpoint for reproduction and Phase 2 comparisons.
 
+### TPU/XLA training option
+
+Training commands accept `--device=auto|cuda|mps|cpu|xla`. The default `--device=auto` preserves the existing priority (`cuda` → `mps` → `xla` → `cpu`) so local GPU, Apple MPS, and CPU workflows continue to behave as before. Use `--device=xla` on a TPU runtime with `torch_xla` installed:
+
+```bash
+PYTHONPATH=. python src/train_coop.py \
+    --device=xla \
+    --model=ViT-B/32 \
+    --train-dataset=IWildCam \
+    --eval-datasets=IWildCamIDVal \
+    --data-location=./data \
+    --batch-size=32 \
+    --workers=0 \
+    --n-ctx=16 \
+    --ctx-init="a photo of a" \
+    --epochs=1
+```
+
+`torch_xla` is intentionally optional because its installation is TPU-platform-specific. If `--device=xla` is requested without a TPU/XLA runtime, the command fails fast with a clear error instead of falling back silently.
+
 ### MaPLe
 
 MaPLe adds deep coupled prompts at every transformer block (text + vision) for OpenAI CLIP `ViT-B/32` while keeping the CLIP backbone frozen. Use it as the primary MaPLe path for comparisons against the CoOp Phase 1.1 baseline in [`docs/results.md`](docs/results.md).
@@ -184,6 +204,36 @@ KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_maple_full.py \
     --wandb-project=PoorFrogs \
     --wandb-run-name=maple-vit-b32 \
     --save=./checkpoints/maple_full_prompt_learner.pt
+```
+
+MaPLe + LoRA uses a separate entrypoint so baseline MaPLe and LoRA experiments stay easy to compare. It adds trainable low-rank adapters only to vision `attn.out_proj` modules. Start with rank 4 or 8 on the last 6 vision blocks to avoid the fused Q/K/V `in_proj_weight` path:
+
+```bash
+KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_maple_lora.py \
+    --model=ViT-B/32 \
+    --train-dataset=IWildCam \
+    --eval-datasets=IWildCamIDVal,IWildCamID,IWildCamOOD \
+    --data-location=./data \
+    --batch-size=32 \
+    --workers=4 \
+    --n-ctx=2 \
+    --maple-prompt-depth=9 \
+    --maple-lora-rank=8 \
+    --maple-lora-alpha=16 \
+    --maple-lora-layers=last6 \
+    --epochs=9 \
+    --lr=0.002 \
+    --wd=1e-5 \
+    --wandb \
+    --wandb-project=PoorFrogs \
+    --wandb-run-name=maple-lora-vit-b32-r8-last6 \
+    --save=./checkpoints/maple_lora_r8_last6.pt
+```
+
+The helper script runs the same MaPLe + LoRA defaults:
+
+```bash
+./scripts/train_maple_lora.sh
 ```
 
 Evaluate a saved best checkpoint without more training:
@@ -275,7 +325,8 @@ src/
 scripts/
 ├── prepare_iwildcam.py          # Dataset CSV preparation
 ├── train_coop.sh                # CoOp training helper
-└── train_maple.sh               # MaPLe training helper
+├── train_maple.sh               # MaPLe baseline training helper
+└── train_maple_lora.sh          # MaPLe + LoRA training helper
 clip/                            # OpenAI CLIP (local package)
 .venv/                           # Virtual environment created by install.sh
 ```

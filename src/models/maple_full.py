@@ -7,7 +7,9 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from src.datasets.dataloader import maybe_dictionarize
+from src.device import optimizer_step
 from src.models import maple_clip
+from src.models.maple_lora import collect_lora_state_dict, inject_vision_out_proj_lora, load_lora_state_dict
 
 
 SUPPORTED_FULL_MAPLE_MODELS = {"ViT-B/32"}
@@ -157,6 +159,15 @@ class CustomFullMaPLeCLIP(torch.nn.Module):
         self.text_encoder = FullMaPLeTextEncoder(clip_model)
         self.logit_scale = clip_model.logit_scale
         self.dtype = clip_model.dtype
+        if getattr(args, "maple_lora_target", "vision_out_proj") != "vision_out_proj":
+            raise ValueError("Only --maple-lora-target=vision_out_proj is currently supported.")
+        inject_vision_out_proj_lora(
+            self,
+            rank=getattr(args, "maple_lora_rank", 0),
+            alpha=getattr(args, "maple_lora_alpha", None),
+            dropout=getattr(args, "maple_lora_dropout", 0.0),
+            layers=getattr(args, "maple_lora_layers", "last6"),
+        )
 
     def forward(self, image):
         prompts, shared_ctx, deep_text_prompts, deep_vision_prompts = self.prompt_learner()
@@ -181,17 +192,23 @@ def save_full_maple_prompt_learner(model, path, args, classnames):
     if directory:
         os.makedirs(directory, exist_ok=True)
     prompt_learner = get_full_maple_prompt_learner(model)
-    torch.save({
+    checkpoint = {
         "prompt_learner": prompt_learner.state_dict(),
         "args": vars(args),
         "classnames": classnames,
         "method": "maple_full",
-    }, path)
+    }
+    lora_state = collect_lora_state_dict(model)
+    if lora_state:
+        checkpoint["lora"] = lora_state
+    torch.save(checkpoint, path)
 
 
 def load_full_maple_prompt_learner(model, path, device):
     checkpoint = torch.load(path, map_location=device)
     get_full_maple_prompt_learner(model).load_state_dict(checkpoint["prompt_learner"])
+    if "lora" in checkpoint:
+        load_lora_state_dict(model.module if hasattr(model, "module") else model, checkpoint["lora"])
 
 
 @dataclass
@@ -225,7 +242,7 @@ def train_full_maple_one_epoch(model, dataloader, optimizer, args, epoch, wandb=
         for name, param in model.named_parameters():
             if param.grad is not None and not torch.isfinite(param.grad).all():
                 raise FloatingPointError(f"Full MaPLe produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
-        optimizer.step()
+        optimizer_step(optimizer, args.device)
         batch_size = labels.shape[0]
         total_loss += loss.item() * batch_size
         total_correct += (logits.argmax(dim=1) == labels).sum().item()

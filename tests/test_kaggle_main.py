@@ -113,6 +113,7 @@ class KaggleMainTest(unittest.TestCase):
         self.assertIn("--best-metric=F1-macro_all", argv)
         self.assertIn("--wandb-project=PoorFrogs", argv)
         self.assertIn("--wandb-run-name=coop-vit-b32-phase11-best-f1", argv)
+        self.assertIn("--wandb", argv)
         self.assertIn("--save=./checkpoints/coop_prompt_learner.pt", argv)
 
     def test_find_repo_root_accepts_directory_with_project_markers(self):
@@ -147,6 +148,21 @@ class KaggleMainTest(unittest.TestCase):
             self.assertEqual(resolved, clone_target)
             self.assertEqual(calls[0][0:2], ["git", "clone"])
 
+    def test_local_package_install_uses_no_deps_to_preserve_kaggle_torch_runtime(self):
+        from kaggle_main import _ensure_local_package_installed
+
+        calls = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            (repo_root / "src").mkdir(parents=True)
+            (repo_root / "src" / "train_coop.py").write_text("", encoding="utf-8")
+            (repo_root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+
+            _ensure_local_package_installed(repo_root, check_call=calls.append)
+
+        self.assertEqual(calls[0][-3:], ["-e", str(repo_root), "--no-deps"])
+
     def test_configure_import_path_adds_repo_root_to_python_imports(self):
         from kaggle_main import configure_import_path
 
@@ -178,6 +194,24 @@ class KaggleMainTest(unittest.TestCase):
         self.assertIn("--wandb-run-name=debug", argv)
         self.assertNotIn("--epochs=15", argv)
         self.assertNotIn("--wandb-run-name=coop-vit-b32-phase11-best-f1", argv)
+
+    def test_build_maple_lora_training_argv_uses_separate_defaults(self):
+        from kaggle_main import build_maple_lora_training_argv
+
+        argv = build_maple_lora_training_argv("./data")
+
+        self.assertIn("--model=ViT-B/32", argv)
+        self.assertIn("--data-location=./data", argv)
+        self.assertIn("--maple-lora-rank=8", argv)
+        self.assertIn("--maple-lora-alpha=16", argv)
+        self.assertIn("--maple-lora-layers=last6", argv)
+        self.assertIn("--wandb-run-name=maple-lora-vit-b32-r8-last6", argv)
+        self.assertIn("--save=./checkpoints/maple_lora_r8_last6.pt", argv)
+
+    def test_train_maple_full_imports_without_removed_shallow_module(self):
+        import src.train_maple_full as train_maple_full
+
+        self.assertTrue(callable(train_maple_full.print_summary))
 
 
 if __name__ == "__main__":
