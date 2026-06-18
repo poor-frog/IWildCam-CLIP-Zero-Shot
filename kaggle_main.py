@@ -90,8 +90,9 @@ C1_DEFAULTS = {
     "--epochs": "3",
     "--val-dataset": "IWildCamVal",
     "--best-metric": "F1-macro_all",
-    "--wandb-run-name": "c1-maple-lora-cbce-kl-vit-b32-bs32",
-    "--save": "/kaggle/working/checkpoints/c1_maple_lora_cbce_kl_vitb32_bs32.pt",
+    "--template": "iwildcam_template",
+    "--wandb-run-name": "c1-maple-lora-kl-vit-b32-bs32",
+    "--save": "/kaggle/working/checkpoints/c1_maple_lora_kl_vitb32_bs32.pt",
 }
 C1_DEFAULT_FLAGS = ["--wandb"]
 C1_KL_WEIGHT = 0.1
@@ -466,13 +467,12 @@ def main():
         run_maple_full(configure_maple_lora_args(parse_arguments()))
     elif mode == "c1":
         sys.argv = build_c1_training_argv(data_location, user_args)
-        print("Running Kaggle C1 MaPLe + LoRA + class-balanced CE + KL training with arguments:")
+        print("Running Kaggle C1 MaPLe + LoRA + KL training with arguments:")
         print(" ".join(sys.argv[1:]))
         from src.config import parse_arguments
         from src.train_maple_lora import configure_maple_lora_args
         from src.train_maple_full import main as run_maple_full
         args = configure_maple_lora_args(parse_arguments())
-        args.class_balanced_ce = True
         args.kl_weight = float(os.environ.get("C1_KL_WEIGHT", C1_KL_WEIGHT))
         args.kl_temperature = float(os.environ.get("C1_KL_TEMPERATURE", C1_KL_TEMPERATURE))
         run_maple_full(args)

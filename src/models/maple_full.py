@@ -280,6 +280,7 @@ def train_full_maple_one_epoch(
     anchor_model=None,
     kl_weight=0.0,
     kl_temperature=1.0,
+    desc="Full MaPLe",
 ):
     model.train()
     total_loss = 0.0
@@ -287,7 +288,7 @@ def train_full_maple_one_epoch(
     total_seen = 0
     max_batches = args.max_train_batches
 
-    for batch_index, data in enumerate(tqdm(dataloader, desc=f"Full MaPLe train epoch {epoch}")):
+    for batch_index, data in enumerate(tqdm(dataloader, desc=f"{desc} train epoch {epoch}")):
         if max_batches is not None and batch_index >= max_batches:
             break
         data = maybe_dictionarize(data)

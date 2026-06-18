@@ -158,6 +158,11 @@ def main(args):
     if args.val_dataset is not None and args.epochs > 0:
         val_dataset = build_eval_dataset(args.val_dataset, SimpleNamespaceEncoder(clip_model, preprocess), args)
 
+    is_c1 = kl_weight != 0.0
+    if is_c1:
+        train_desc = "C1 MaPLe+LoRA+KL" + ("+CBCE" if class_weights else "")
+    else:
+        train_desc = "MaPLe+CBCE" if class_weights else "Full MaPLe"
     for epoch in range(1, args.epochs + 1):
         stats = train_full_maple_one_epoch(
             model,
@@ -170,6 +175,7 @@ def main(args):
             anchor_model=anchor_model,
             kl_weight=kl_weight,
             kl_temperature=kl_temperature,
+            desc=train_desc,
         )
         scheduler.step()
         print(f"Epoch {epoch}: loss={stats.loss:.4f}, acc={stats.accuracy:.4f}")
