@@ -38,6 +38,45 @@ def get_nonempty_subset(dataset, split, frac=1.0, transform=None):
     return subset
 
 
+def compute_class_counts(labels, num_classes):
+    labels = np.asarray(labels, dtype=np.int64)
+    if labels.size == 0:
+        raise ValueError("Cannot compute class counts from empty labels.")
+    if num_classes <= 0:
+        raise ValueError("num_classes must be positive.")
+    if labels.min() < 0 or labels.max() >= num_classes:
+        raise ValueError("labels must be in [0, num_classes).")
+    return np.bincount(labels, minlength=num_classes).astype(np.float64)
+
+
+def compute_class_priors(labels, num_classes):
+    counts = compute_class_counts(labels, num_classes)
+    total = counts.sum()
+    if total <= 0:
+        raise ValueError("Cannot compute class priors from zero total count.")
+    return counts, counts / total
+
+
+def compute_inverse_frequency_weights(labels, num_classes, eps=1e-12):
+    counts, priors = compute_class_priors(labels, num_classes)
+    present = counts > 0
+    weights = np.zeros(num_classes, dtype=np.float64)
+    weights[present] = 1.0 / np.maximum(priors[present], eps)
+    if present.any():
+        weights[present] *= present.sum() / weights[present].sum()
+    return counts, priors, weights
+
+
+def get_train_class_priors(dataset, num_classes):
+    train_subset = dataset.get_subset('train', transform=None)
+    labels = getattr(train_subset, 'y_array', None)
+    if labels is None:
+        raise ValueError("Train subset does not expose y_array labels.")
+    if hasattr(labels, 'detach'):
+        labels = labels.detach().cpu().numpy()
+    return compute_class_priors(labels, num_classes)
+
+
 class IWildCam:
     def __init__(self,
                  preprocess,
@@ -78,6 +117,11 @@ class IWildCam:
 class IWildCamIDVal(IWildCam):
     def __init__(self, *args, **kwargs):
         kwargs['subset'] = 'id_val'
+        super().__init__(*args, **kwargs)
+
+class IWildCamVal(IWildCam):
+    def __init__(self, *args, **kwargs):
+        kwargs['subset'] = 'val'
         super().__init__(*args, **kwargs)
 
 class IWildCamID(IWildCam):

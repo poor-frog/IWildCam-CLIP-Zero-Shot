@@ -3,6 +3,8 @@ from src.datasets.dataloader import get_dataloader, maybe_dictionarize
 import src.datasets as datasets
 import torch.nn.functional as F
 
+from src.models.logit_adjustment import apply_logit_adjustment
+
 
 def get_logits(x, model, classification_head):
     """Get logits from an image classifier model."""
@@ -11,7 +13,7 @@ def get_logits(x, model, classification_head):
     return logits
 
 
-def eval_single_dataset(image_classifier, dataset, args, classification_head):
+def eval_single_dataset(image_classifier, dataset, args, classification_head, tau=None, class_priors=None):
 
     model = image_classifier
     input_key = 'images'
@@ -48,6 +50,8 @@ def eval_single_dataset(image_classifier, dataset, args, classification_head):
             projection_fn = getattr(dataset, 'project_logits', None)
             if projection_fn is not None:
                 logits = projection_fn(logits, device)
+
+            logits = apply_logit_adjustment(logits, class_priors, tau)
 
             if hasattr(dataset, 'project_labels'):
                 y = dataset.project_labels(y, device)
@@ -86,7 +90,7 @@ def eval_single_dataset(image_classifier, dataset, args, classification_head):
 
 
 def eval_single_batch_dataset(image_classifier, dataset, args,
-                              classification_head, data):
+                              classification_head, data, tau=None, class_priors=None):
 
     model = image_classifier
     input_key = 'images'
@@ -117,6 +121,8 @@ def eval_single_batch_dataset(image_classifier, dataset, args,
         projection_fn = getattr(dataset, 'project_logits', None)
         if projection_fn is not None:
             logits = projection_fn(logits, device)
+
+        logits = apply_logit_adjustment(logits, class_priors, tau)
 
         if hasattr(dataset, 'project_labels'):
             y = dataset.project_labels(y, device)

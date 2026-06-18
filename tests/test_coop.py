@@ -43,6 +43,7 @@ class CoOpModuleTest(unittest.TestCase):
 
         with patch("src.device.get_xla_device", return_value="xla:0"), \
              patch("torch.cuda.is_available", return_value=True), \
+             patch("torch.zeros", return_value=torch.tensor([0.0])), \
              patch("torch.backends.mps.is_available", return_value=True):
             self.assertEqual(select_default_device(), "cuda")
 
@@ -60,8 +61,18 @@ class CoOpModuleTest(unittest.TestCase):
         from src.device import select_default_device
 
         with patch("src.device.get_xla_device", return_value=None), \
-             patch("torch.cuda.is_available", return_value=True):
+             patch("torch.cuda.is_available", return_value=True), \
+             patch("torch.zeros", return_value=torch.tensor([0.0])):
             self.assertEqual(select_default_device(), "cuda")
+
+    def test_device_selection_falls_back_when_cuda_is_advertised_but_unusable(self):
+        from src.device import select_default_device
+
+        with patch("src.device.get_xla_device", return_value=None), \
+             patch("torch.cuda.is_available", return_value=True), \
+             patch("torch.zeros", side_effect=AssertionError("Torch not compiled with CUDA enabled")), \
+             patch("torch.backends.mps.is_available", return_value=False):
+            self.assertEqual(select_default_device(), "cpu")
 
         with patch("src.device.get_xla_device", return_value=None), \
              patch("torch.cuda.is_available", return_value=False), \

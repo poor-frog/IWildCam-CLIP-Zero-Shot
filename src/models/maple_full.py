@@ -155,7 +155,7 @@ class CustomFullMaPLeCLIP(torch.nn.Module):
             param.requires_grad = False
         self.prompt_learner = FullMaPLePromptLearner(args, classnames, clip_model)
         self.tokenized_prompts = self.prompt_learner.tokenized_prompts
-        self.image_encoder = clip_model.visual
+        self.image_encoder = copy.deepcopy(clip_model.visual)
         self.text_encoder = FullMaPLeTextEncoder(clip_model)
         self.logit_scale = clip_model.logit_scale
         self.dtype = clip_model.dtype
@@ -218,7 +218,69 @@ class TrainStats:
     accuracy: float
 
 
-def train_full_maple_one_epoch(model, dataloader, optimizer, args, epoch, wandb=None):
+@dataclass
+class MapleLossResult:
+    ce: torch.Tensor
+    kl: torch.Tensor
+    total: torch.Tensor
+
+    @property
+    def loss(self):
+        return self.total
+
+    def to_log_dict(self, prefix):
+        return {
+            f"{prefix}_ce": self.ce.item(),
+            f"{prefix}_kl": self.kl.item(),
+            f"{prefix}_total": self.total.item(),
+        }
+
+
+def compute_maple_cross_entropy(
+    logits,
+    labels,
+    class_weights=None,
+    anchor_logits=None,
+    kl_weight=0.0,
+    kl_temperature=1.0,
+    return_components=False,
+):
+    if class_weights is None:
+        ce_loss = F.cross_entropy(logits, labels)
+    else:
+        weights = class_weights.to(device=logits.device, dtype=logits.dtype)
+        ce_loss = F.cross_entropy(logits, labels, weight=weights)
+
+    use_kl = anchor_logits is not None and kl_weight != 0.0
+    if use_kl:
+        if kl_temperature <= 0:
+            raise ValueError("kl_temperature must be > 0 when KL is used.")
+        kl_loss = F.kl_div(
+            F.log_softmax(logits / kl_temperature, dim=1),
+            F.softmax(anchor_logits / kl_temperature, dim=1),
+            reduction="batchmean",
+        )
+    else:
+        kl_loss = ce_loss.new_zeros(())
+
+    total_loss = ce_loss + kl_weight * kl_temperature * kl_temperature * kl_loss
+    if return_components:
+        return MapleLossResult(ce=ce_loss, kl=kl_loss, total=total_loss)
+    return total_loss
+
+
+def train_full_maple_one_epoch(
+    model,
+    dataloader,
+    optimizer,
+    args,
+    epoch,
+    wandb=None,
+    class_weights=None,
+    anchor_model=None,
+    kl_weight=0.0,
+    kl_temperature=1.0,
+):
     model.train()
     total_loss = 0.0
     total_correct = 0
@@ -234,7 +296,22 @@ def train_full_maple_one_epoch(model, dataloader, optimizer, args, epoch, wandb=
         logits = model(images)
         if not torch.isfinite(logits).all():
             raise FloatingPointError(f"Full MaPLe produced non-finite logits at epoch {epoch}, batch {batch_index}")
-        loss = F.cross_entropy(logits, labels)
+        if anchor_model is not None and kl_weight != 0.0:
+            with torch.no_grad():
+                anchor_logits = anchor_model(images)
+            loss_result = compute_maple_cross_entropy(
+                logits,
+                labels,
+                class_weights=class_weights,
+                anchor_logits=anchor_logits,
+                kl_weight=kl_weight,
+                kl_temperature=kl_temperature,
+                return_components=True,
+            )
+            loss = loss_result.loss
+        else:
+            loss_result = None
+            loss = compute_maple_cross_entropy(logits, labels, class_weights=class_weights)
         if not torch.isfinite(loss):
             raise FloatingPointError(f"Full MaPLe produced non-finite loss at epoch {epoch}, batch {batch_index}")
         optimizer.zero_grad()
@@ -248,15 +325,18 @@ def train_full_maple_one_epoch(model, dataloader, optimizer, args, epoch, wandb=
         total_correct += (logits.argmax(dim=1) == labels).sum().item()
         total_seen += batch_size
         if wandb is not None:
-            wandb.log({
+            log_fields = {
                 "train/batch_loss": loss.item(),
                 "train/epoch": epoch,
                 "train/batch": batch_index,
-            })
+            }
+            if loss_result is not None:
+                log_fields.update(loss_result.to_log_dict(prefix="train/batch"))
+            wandb.log(log_fields)
 
     return TrainStats(epoch=epoch, loss=total_loss / total_seen, accuracy=total_correct / total_seen)
 
 
-def eval_full_maple_single_dataset(model, dataset, args):
+def eval_full_maple_single_dataset(model, dataset, args, tau=None, class_priors=None):
     from src.models.coop import eval_coop_single_dataset
-    return eval_coop_single_dataset(model, dataset, args, desc="MaPLe eval")
+    return eval_coop_single_dataset(model, dataset, args, desc="MaPLe eval", tau=tau, class_priors=class_priors)

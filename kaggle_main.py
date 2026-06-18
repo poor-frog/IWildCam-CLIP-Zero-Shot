@@ -51,15 +51,51 @@ FULL_MAPLE_DEFAULTS = {
 }
 FULL_MAPLE_DEFAULT_FLAGS = ["--wandb"]
 
+MAPLE_CBCE_DEFAULTS = {
+    **FULL_MAPLE_DEFAULTS,
+    "--eval-datasets": "IWildCamVal",
+    "--val-dataset": "IWildCamVal",
+    "--wandb-run-name": "a1-maple-cbce-iwildcamval",
+    "--save": "/kaggle/working/checkpoints/a1_maple_cbce_iwildcamval.pt",
+}
+MAPLE_CBCE_FLAGS = ["--wandb"]
+
+MAPLE_TAU_SWEEP_EVAL_DEFAULTS = {
+    **FULL_MAPLE_DEFAULTS,
+    "--eval-datasets": "IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
+    "--epochs": "0",
+    "--selection-split": "IWildCamVal",
+    "--logit-adjustment-tau-grid": "0,0.25,0.5,0.75,1,1.5,2",
+    "--wandb-run-name": "maple-vanilla-tau-sweep-iwildcamval",
+    "--load": "/kaggle/input/maple-vanilla-checkpoint/maple_full_prompt_learner_best.pt",
+}
+MAPLE_TAU_SWEEP_EVAL_FLAGS = ["--wandb"]
+
 MAPLE_LORA_DEFAULTS = {
     **FULL_MAPLE_DEFAULTS,
-    "--maple-lora-rank": "8",
-    "--maple-lora-alpha": "16",
+    "--epochs": "3",
+    "--lr": "0.001",
+    "--maple-lora-rank": "4",
+    "--maple-lora-alpha": "8",
     "--maple-lora-layers": "last6",
-    "--wandb-run-name": "maple-lora-vit-b32-r8-last6",
-    "--save": "./checkpoints/maple_lora_r8_last6.pt",
+    "--wandb-run-name": "maple-lora-vit-b32-r4-last6-e3-lr1e-3",
+    "--save": "./checkpoints/maple_lora_r4_last6_e3_lr1e-3.pt",
 }
 MAPLE_LORA_DEFAULT_FLAGS = ["--wandb"]
+
+C1_DEFAULTS = {
+    **MAPLE_LORA_DEFAULTS,
+    "--eval-datasets": "IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
+    "--batch-size": "32",
+    "--epochs": "3",
+    "--val-dataset": "IWildCamVal",
+    "--best-metric": "F1-macro_all",
+    "--wandb-run-name": "c1-maple-lora-cbce-kl-vit-b32-bs32",
+    "--save": "/kaggle/working/checkpoints/c1_maple_lora_cbce_kl_vitb32_bs32.pt",
+}
+C1_DEFAULT_FLAGS = ["--wandb"]
+C1_KL_WEIGHT = 0.1
+C1_KL_TEMPERATURE = 1.0
 
 
 def strip_mode_args(argv):
@@ -248,6 +284,42 @@ def build_full_maple_training_argv(data_location, user_args=None):
     return argv
 
 
+def build_maple_cbce_training_argv(data_location, user_args=None):
+    user_args = user_args or []
+    argv = ["kaggle_main.py"]
+    provided = _provided_option_names([argv[0], *user_args])
+
+    defaults = {**MAPLE_CBCE_DEFAULTS, "--data-location": data_location}
+    for name, value in defaults.items():
+        if name not in provided:
+            argv.append(f"{name}={value}")
+
+    for flag in MAPLE_CBCE_FLAGS:
+        if flag not in provided and f"--no-{flag[2:]}" not in provided:
+            argv.append(flag)
+
+    argv.extend(user_args)
+    return argv
+
+
+def build_maple_tau_sweep_eval_argv(data_location, user_args=None):
+    user_args = user_args or []
+    argv = ["kaggle_main.py"]
+    provided = _provided_option_names([argv[0], *user_args])
+
+    defaults = {**MAPLE_TAU_SWEEP_EVAL_DEFAULTS, "--data-location": data_location}
+    for name, value in defaults.items():
+        if name not in provided:
+            argv.append(f"{name}={value}")
+
+    for flag in MAPLE_TAU_SWEEP_EVAL_FLAGS:
+        if flag not in provided and f"--no-{flag[2:]}" not in provided:
+            argv.append(flag)
+
+    argv.extend(user_args)
+    return argv
+
+
 def build_maple_lora_training_argv(data_location, user_args=None):
     user_args = user_args or []
     argv = ["kaggle_main.py"]
@@ -259,6 +331,24 @@ def build_maple_lora_training_argv(data_location, user_args=None):
             argv.append(f"{name}={value}")
 
     for flag in MAPLE_LORA_DEFAULT_FLAGS:
+        if flag not in provided and f"--no-{flag[2:]}" not in provided:
+            argv.append(flag)
+
+    argv.extend(user_args)
+    return argv
+
+
+def build_c1_training_argv(data_location, user_args=None):
+    user_args = user_args or []
+    argv = ["kaggle_main.py"]
+    provided = _provided_option_names([argv[0], *user_args])
+
+    defaults = {**C1_DEFAULTS, "--data-location": data_location}
+    for name, value in defaults.items():
+        if name not in provided:
+            argv.append(f"{name}={value}")
+
+    for flag in C1_DEFAULT_FLAGS:
         if flag not in provided and f"--no-{flag[2:]}" not in provided:
             argv.append(flag)
 
@@ -301,17 +391,43 @@ def _configure_wandb_from_kaggle_secret():
     return bool(os.environ.get("WANDB_API_KEY"))
 
 
+def _patch_iwildcam_val():
+    """Patch IWildCamVal into cloned repo's datasets if missing."""
+    try:
+        import src.datasets as _ds
+        import src.datasets.iwildcam as _iwildcam
+    except ImportError:
+        return  # dependencies may not be installed yet
+
+    if hasattr(_ds, "IWildCamVal"):
+        return
+
+    class IWildCamVal(_iwildcam.IWildCam):
+        def __init__(self, *args, **kwargs):
+            kwargs["subset"] = "val"
+            super().__init__(*args, **kwargs)
+
+    _iwildcam.IWildCamVal = IWildCamVal
+    _ds.IWildCamVal = IWildCamVal
+    if hasattr(_ds, "__all__") and "IWildCamVal" not in _ds.__all__:
+        _ds.__all__.append("IWildCamVal")
+    print("Patched IWildCamVal into cloned repo datasets.")
+
+
 def main():
     repo_root = ensure_repo_root()
     os.chdir(repo_root)
     configure_import_path(repo_root)
 
     mode = parse_mode(sys.argv)
-    if mode not in ("coop", "full_maple", "maple_lora"):
-        raise ValueError(f"Unknown mode: {mode}. Use --mode=coop, --mode=full_maple, or --mode=maple_lora.")
+    if mode not in ("coop", "full_maple", "maple_cbce", "maple_tau_sweep", "maple_lora", "c1"):
+        raise ValueError(
+            f"Unknown mode: {mode}. Use --mode=coop, --mode=full_maple, --mode=maple_cbce, --mode=maple_tau_sweep, --mode=maple_lora, or --mode=c1."
+        )
 
     _ensure_deps()
     _ensure_local_package_installed(repo_root)
+    _patch_iwildcam_val()
     _configure_wandb_from_kaggle_secret()
     data_location = prepare_iwildcam_layout(repo_root)
 
@@ -324,6 +440,22 @@ def main():
         from src.config import parse_arguments
         from src.train_maple_full import main as run_maple_full
         run_maple_full(parse_arguments())
+    elif mode == "maple_cbce":
+        sys.argv = build_maple_cbce_training_argv(data_location, user_args)
+        print("Running Kaggle MaPLe + class-balanced CE training with arguments:")
+        print(" ".join(sys.argv[1:]))
+        from src.config import parse_arguments
+        from src.train_maple_full import main as run_maple_full
+        args = parse_arguments()
+        args.class_balanced_ce = True
+        run_maple_full(args)
+    elif mode == "maple_tau_sweep":
+        sys.argv = build_maple_tau_sweep_eval_argv(data_location, user_args)
+        print("Running Kaggle vanilla MaPLe tau-sweep evaluation with arguments:")
+        print(" ".join(sys.argv[1:]))
+        from src.config import parse_arguments
+        from src.train_maple_full import main as run_maple_full
+        run_maple_full(parse_arguments())
     elif mode == "maple_lora":
         sys.argv = build_maple_lora_training_argv(data_location, user_args)
         print("Running Kaggle MaPLe + LoRA training with arguments:")
@@ -332,6 +464,18 @@ def main():
         from src.train_maple_lora import configure_maple_lora_args
         from src.train_maple_full import main as run_maple_full
         run_maple_full(configure_maple_lora_args(parse_arguments()))
+    elif mode == "c1":
+        sys.argv = build_c1_training_argv(data_location, user_args)
+        print("Running Kaggle C1 MaPLe + LoRA + class-balanced CE + KL training with arguments:")
+        print(" ".join(sys.argv[1:]))
+        from src.config import parse_arguments
+        from src.train_maple_lora import configure_maple_lora_args
+        from src.train_maple_full import main as run_maple_full
+        args = configure_maple_lora_args(parse_arguments())
+        args.class_balanced_ce = True
+        args.kl_weight = float(os.environ.get("C1_KL_WEIGHT", C1_KL_WEIGHT))
+        args.kl_temperature = float(os.environ.get("C1_KL_TEMPERATURE", C1_KL_TEMPERATURE))
+        run_maple_full(args)
     else:
         sys.argv = build_coop_training_argv(data_location, user_args)
         print("Running Kaggle CoOp training with arguments:")

@@ -92,6 +92,12 @@ def parse_arguments():
     parser.add_argument("--maple-lora-dropout", type=float, default=0.0, help="Reserved for optional MaPLe LoRA adapters; currently must remain 0.0 for out_proj weight parametrization.")
     parser.add_argument("--maple-lora-target", type=str, default="vision_out_proj", choices=["vision_out_proj"], help="Optional MaPLe LoRA target modules.")
     parser.add_argument("--maple-lora-layers", type=str, default="last6", help="Optional MaPLe LoRA layer selection: 'lastN' or 'all'.")
+    parser.add_argument("--class-balanced-ce", action="store_true", help="Use train-only inverse-frequency class weights for MaPLe cross-entropy.")
+    parser.add_argument("--kl-weight", type=float, default=0.0, help="Optional GLAD-lite KL distillation weight; 0 disables KL.")
+    parser.add_argument("--kl-temperature", type=float, default=1.0, help="Temperature for optional GLAD-lite KL distillation.")
+    parser.add_argument("--logit-adjustment-tau", type=float, default=None, help="Optional fixed post-hoc logit-adjustment tau; 0 disables adjustment.")
+    parser.add_argument("--logit-adjustment-tau-grid", type=str, default=None, help="Optional comma-separated tau grid for IWildCamVal selection, e.g. '0,1'.")
+    parser.add_argument("--selection-split", type=str, default="IWildCamVal", help="Validation split used for tau selection. IWildCamOOD is forbidden.")
 
     parsed_args = parser.parse_args()
     parsed_args.device = resolve_device_choice(parsed_args.device)

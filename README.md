@@ -38,6 +38,12 @@ This creates `data/train.csv`. It is not required for the current zero-shot eval
 
 ## Zero-shot Evaluation
 
+### IWildCam split protocol
+
+- `IWildCamVal` maps to the official WILDS `val` split and is the validation split for model, hyperparameter, checkpoint, tau, lambda, LR, and epoch selection.
+- `IWildCamIDVal` maps to WILDS `id_val` and remains available for historical in-distribution validation compatibility.
+- `IWildCamOOD` maps to WILDS `test` and is final-test-only. Do not use `IWildCamOOD` for tuning, checkpoint selection, tau selection, lambda selection, LR selection, epoch selection, or model selection.
+
 ```bash
 KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/main.py \
     --model=ViT-B-16 \

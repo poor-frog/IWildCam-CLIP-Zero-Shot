@@ -8,6 +8,7 @@ from tqdm import tqdm
 import clip.clip as clip
 from src.datasets.dataloader import maybe_dictionarize
 from src.device import optimizer_step
+from src.models.logit_adjustment import apply_logit_adjustment
 
 
 OPENAI_CLIP_MODELS = {"RN50", "RN101", "RN50x4", "RN50x16", "RN50x64", "ViT-B/32", "ViT-B/16", "ViT-L/14"}
@@ -243,7 +244,7 @@ def train_one_epoch(model, dataloader, optimizer, args, epoch, wandb=None):
     return TrainStats(epoch=epoch, loss=total_loss / total_seen, accuracy=total_correct / total_seen)
 
 
-def eval_coop_single_dataset(model, dataset, args, desc="CoOp eval"):
+def eval_coop_single_dataset(model, dataset, args, desc="CoOp eval", tau=None, class_priors=None):
     model.eval()
     loader = dataset.test_loader
     correct = 0
@@ -260,6 +261,7 @@ def eval_coop_single_dataset(model, dataset, args, desc="CoOp eval"):
             images = data["images"].to(args.device)
             labels = data["labels"].to(args.device)
             logits = model(images)
+            logits = apply_logit_adjustment(logits, class_priors, tau)
             correct += (logits.argmax(dim=1) == labels).sum().item()
             seen += labels.shape[0]
             if hasattr(dataset, "post_loop_metrics"):

@@ -20,6 +20,12 @@ from src.models.coop import (
     save_prompt_learner,
     train_one_epoch,
 )
+from src.models.logit_adjustment import (
+    build_train_class_priors_for_dataset,
+    describe_tau_selection,
+    parse_tau_grid,
+    select_best_tau,
+)
 
 
 def init_wandb(args):
@@ -205,12 +211,29 @@ def main(args):
             f"for final eval (epoch {best_epoch}, {args.best_metric}={best_score:.4f})"
         )
 
+    _, class_priors = build_train_class_priors_for_dataset(train_data, args.device)
+    selected_tau = args.logit_adjustment_tau
+    tau_grid = parse_tau_grid(args.logit_adjustment_tau_grid)
+    if tau_grid is not None:
+        selection_dataset = build_eval_dataset(args.selection_split, clip_encoder, args)
+        selection = select_best_tau(
+            eval_coop_single_dataset,
+            model,
+            selection_dataset,
+            args,
+            tau_grid=tau_grid,
+            class_priors=class_priors,
+        )
+        for line in describe_tau_selection(selection):
+            print(line)
+        selected_tau = selection.best_tau
+
     summary_rows = []
     if args.eval_datasets is not None:
         for dataset_name in args.eval_datasets:
             print(f"Evaluating CoOp on {dataset_name}...")
             eval_dataset = build_eval_dataset(dataset_name, clip_encoder, args)
-            results = eval_coop_single_dataset(model, eval_dataset, args)
+            results = eval_coop_single_dataset(model, eval_dataset, args, tau=selected_tau, class_priors=class_priors)
             top1 = results.get("top1")
             f1_macro = results.get("F1-macro_all")
             print(f"  {dataset_name} Top-1 accuracy: {top1:.4f}")

@@ -20,6 +20,12 @@ from src.config import parse_arguments
 from src.models.clip_encoder import CLIPEncoder
 from src.models.zeroshot import get_zeroshot_classifier
 from src.models.eval import eval_single_dataset
+from src.models.logit_adjustment import (
+    build_train_class_priors_for_dataset,
+    describe_tau_selection,
+    parse_tau_grid,
+    select_best_tau,
+)
 import src.datasets as datasets
 
 
@@ -98,6 +104,37 @@ def main(args):
     if hasattr(clip_encoder.model, 'transformer'):
         delattr(clip_encoder.model, 'transformer')
 
+    class_priors = None
+    selected_tau = args.logit_adjustment_tau
+    tau_grid = parse_tau_grid(args.logit_adjustment_tau_grid)
+    if tau_grid is not None or selected_tau is not None:
+        train_dataset = getattr(datasets, args.train_dataset)(
+            clip_encoder.val_preprocess,
+            location=args.data_location,
+            batch_size=args.batch_size,
+            num_workers=args.workers,
+        )
+        _, class_priors = build_train_class_priors_for_dataset(train_dataset, args.device)
+    if tau_grid is not None:
+        selection_dataset = getattr(datasets, args.selection_split)(
+            clip_encoder.val_preprocess,
+            location=args.data_location,
+            batch_size=args.batch_size,
+            num_workers=args.workers,
+        )
+        selection = select_best_tau(
+            eval_single_dataset,
+            clip_encoder,
+            selection_dataset,
+            args,
+            tau_grid=tau_grid,
+            class_priors=class_priors,
+            classification_head=classification_head,
+        )
+        for line in describe_tau_selection(selection):
+            print(line)
+        selected_tau = selection.best_tau
+
     # Evaluate on each dataset
     print(f"\n=== Zero-shot evaluation on: {args.eval_datasets} ===\n")
     summary_rows = []
@@ -111,7 +148,7 @@ def main(args):
         )
 
         results = eval_single_dataset(
-            clip_encoder, dataset, args, classification_head,
+            clip_encoder, dataset, args, classification_head, tau=selected_tau, class_priors=class_priors,
         )
 
         if 'top1' in results:

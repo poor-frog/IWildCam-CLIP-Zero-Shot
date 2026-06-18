@@ -13,15 +13,15 @@ KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_maple_lora.py \
   --workers=4 \
   --n-ctx=2 \
   --maple-prompt-depth=9 \
-  --maple-lora-rank=8 \
-  --maple-lora-alpha=16 \
+  --maple-lora-rank=4 \
+  --maple-lora-alpha=8 \
   --maple-lora-layers=last6 \
-  --epochs=9 \
-  --lr=0.002 \
+  --epochs=1 \
+  --lr=0.001 \
   --wd=1e-5 \
   --val-dataset=IWildCamIDVal \
   --best-metric=F1-macro_all \
   --wandb \
   --wandb-project=PoorFrogs \
-  --wandb-run-name=maple-lora-vit-b32-r8-last6 \
-  --save=./checkpoints/maple_lora_r8_last6.pt
+  --wandb-run-name=MaPLe-LoRA-ViT-B32-r8-last6 \
+  --save=./checkpoints/maple_lora_r4_last6.pt

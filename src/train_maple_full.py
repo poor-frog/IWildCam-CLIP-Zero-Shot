@@ -9,6 +9,7 @@ import torch
 
 import src.datasets as datasets
 from src.config import parse_arguments
+from src.datasets.iwildcam import compute_inverse_frequency_weights
 from src.models.coop import maybe_data_parallel
 from src.models import maple_clip
 from src.models.maple_full import (
@@ -18,6 +19,17 @@ from src.models.maple_full import (
     load_full_maple_prompt_learner,
     save_full_maple_prompt_learner,
     train_full_maple_one_epoch,
+)
+from src.models.logit_adjustment import (
+    build_train_class_priors_for_dataset,
+    describe_tau_selection,
+    parse_tau_grid,
+    select_best_tau,
+)
+from src.models.zeroshot import (
+    FrozenZeroShotAnchor,
+    MaPLeZeroPromptImageEncoder,
+    get_compatible_zeroshot_classifier,
 )
 from src.train_coop import build_eval_dataset, get_validation_score, log_wandb_summary
 
@@ -78,6 +90,19 @@ def resolve_best_checkpoint_path(args):
     return os.path.join("checkpoints", "maple_full_prompt_learner_best.pt")
 
 
+def build_class_balanced_ce_weights(train_data, device):
+    source_dataset = train_data if hasattr(train_data, "get_subset") else train_data.dataset
+    train_subset = source_dataset.get_subset("train", transform=None)
+    labels = getattr(train_subset, "y_array", None)
+    if labels is None:
+        raise ValueError("Train subset does not expose y_array labels.")
+    if hasattr(labels, "detach"):
+        labels = labels.detach().cpu().numpy()
+    num_classes = len(train_data.classnames)
+    _, _, weights = compute_inverse_frequency_weights(labels, num_classes)
+    return torch.as_tensor(weights, dtype=torch.float32, device=device)
+
+
 def main(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -106,6 +131,22 @@ def main(args):
     if args.load is not None:
         load_full_maple_prompt_learner(model, args.load, args.device)
 
+    class_weights = None
+    if getattr(args, "class_balanced_ce", False):
+        class_weights = build_class_balanced_ce_weights(train_data, args.device)
+
+    anchor_model = None
+    kl_weight = getattr(args, "kl_weight", 0.0)
+    kl_temperature = getattr(args, "kl_temperature", 1.0)
+    if kl_weight != 0.0:
+        classification_head = get_compatible_zeroshot_classifier(args, device=args.device).to(args.device)
+        anchor_image_encoder = MaPLeZeroPromptImageEncoder(
+            clip_model.visual,
+            n_ctx=args.n_ctx,
+            prompt_depth=args.maple_prompt_depth,
+        ).to(args.device)
+        anchor_model = FrozenZeroShotAnchor(anchor_image_encoder, classification_head).to(args.device)
+
     trainable_parameters = [param for param in model.parameters() if param.requires_grad]
     optimizer = torch.optim.AdamW(trainable_parameters, lr=args.lr, weight_decay=args.wd)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
@@ -118,7 +159,18 @@ def main(args):
         val_dataset = build_eval_dataset(args.val_dataset, SimpleNamespaceEncoder(clip_model, preprocess), args)
 
     for epoch in range(1, args.epochs + 1):
-        stats = train_full_maple_one_epoch(model, train_data.train_loader, optimizer, args, epoch, wandb=wandb)
+        stats = train_full_maple_one_epoch(
+            model,
+            train_data.train_loader,
+            optimizer,
+            args,
+            epoch,
+            wandb=wandb,
+            class_weights=class_weights,
+            anchor_model=anchor_model,
+            kl_weight=kl_weight,
+            kl_temperature=kl_temperature,
+        )
         scheduler.step()
         print(f"Epoch {epoch}: loss={stats.loss:.4f}, acc={stats.accuracy:.4f}")
         if wandb is not None:
@@ -169,13 +221,31 @@ def main(args):
             f"for final eval (epoch {best_epoch}, {args.best_metric}={best_score:.4f})"
         )
 
+    _, class_priors = build_train_class_priors_for_dataset(train_data, args.device)
+    selected_tau = args.logit_adjustment_tau
+    tau_grid = parse_tau_grid(args.logit_adjustment_tau_grid)
+    if tau_grid is not None:
+        eval_encoder = SimpleNamespaceEncoder(clip_model, preprocess)
+        selection_dataset = build_eval_dataset(args.selection_split, eval_encoder, args)
+        selection = select_best_tau(
+            eval_full_maple_single_dataset,
+            model,
+            selection_dataset,
+            args,
+            tau_grid=tau_grid,
+            class_priors=class_priors,
+        )
+        for line in describe_tau_selection(selection):
+            print(line)
+        selected_tau = selection.best_tau
+
     summary_rows = []
     if args.eval_datasets is not None:
         eval_encoder = SimpleNamespaceEncoder(clip_model, preprocess)
         for dataset_name in args.eval_datasets:
             print(f"Evaluating full MaPLe on {dataset_name}...")
             eval_dataset = build_eval_dataset(dataset_name, eval_encoder, args)
-            results = eval_full_maple_single_dataset(model, eval_dataset, args)
+            results = eval_full_maple_single_dataset(model, eval_dataset, args, tau=selected_tau, class_priors=class_priors)
             top1 = results.get("top1")
             f1_macro = results.get("F1-macro_all")
             print(f"  {dataset_name} Top-1 accuracy: {top1:.4f}")

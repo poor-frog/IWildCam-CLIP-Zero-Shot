@@ -37,7 +37,7 @@ def _cuda_is_usable():
     try:
         torch.zeros(1, device="cuda")
         return True
-    except (RuntimeError, torch.AcceleratorError) as exc:
+    except (AssertionError, RuntimeError, torch.AcceleratorError) as exc:
         warnings.warn(f"CUDA device found but is not usable by this PyTorch build: {exc}")
         return False
 
