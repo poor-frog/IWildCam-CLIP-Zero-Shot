@@ -1,5 +1,6 @@
 import copy
 import os
+from contextlib import nullcontext
 from dataclasses import dataclass
 
 import torch
@@ -12,14 +13,14 @@ from src.models import maple_clip
 from src.models.maple_lora import collect_lora_state_dict, inject_vision_out_proj_lora, load_lora_state_dict
 
 
-SUPPORTED_FULL_MAPLE_MODELS = {"ViT-B/32"}
+SUPPORTED_FULL_MAPLE_MODELS = {"ViT-B/32", "ViT-B/16"}
 
 
 def _get_clones(module, count):
     return torch.nn.ModuleList([copy.deepcopy(module) for _ in range(count)])
 
 
-def ensure_openai_vit_b32_for_full_maple(clip_model, model_name):
+def ensure_openai_vit_for_full_maple(clip_model, model_name):
     required_attrs = (
         "token_embedding",
         "transformer",
@@ -35,14 +36,14 @@ def ensure_openai_vit_b32_for_full_maple(clip_model, model_name):
     visual_missing = [name for name in visual_required if visual is None or not hasattr(visual, name)]
     if model_name not in SUPPORTED_FULL_MAPLE_MODELS or missing or visual_missing:
         raise ValueError(
-            "Full MaPLe supports OpenAI CLIP ViT-B/32 only. "
+            "Full MaPLe supports OpenAI CLIP ViT-B/32 or ViT-B/16. "
             f"Model {model_name!r} is missing CLIP attrs={missing}, visual attrs={visual_missing}"
         )
 
 
 def load_maple_clip_to_cpu(model_name="ViT-B/32", prompt_depth=9, n_ctx=2):
     if model_name not in SUPPORTED_FULL_MAPLE_MODELS:
-        raise ValueError("Full MaPLe supports OpenAI CLIP ViT-B/32 only.")
+        raise ValueError("Full MaPLe supports OpenAI CLIP ViT-B/32 or ViT-B/16.")
     design_details = build_maple_design_details(prompt_depth=prompt_depth, n_ctx=n_ctx)
     model, _ = maple_clip.load(model_name, device="cpu", jit=False, design_details=design_details)
     return model
@@ -150,7 +151,7 @@ class FullMaPLeTextEncoder(torch.nn.Module):
 class CustomFullMaPLeCLIP(torch.nn.Module):
     def __init__(self, args, classnames, clip_model):
         super().__init__()
-        ensure_openai_vit_b32_for_full_maple(clip_model, args.model)
+        ensure_openai_vit_for_full_maple(clip_model, args.model)
         for param in clip_model.parameters():
             param.requires_grad = False
         self.prompt_learner = FullMaPLePromptLearner(args, classnames, clip_model)
@@ -281,6 +282,8 @@ def train_full_maple_one_epoch(
     kl_weight=0.0,
     kl_temperature=1.0,
     desc="Full MaPLe",
+    scheduler=None,
+    scaler=None,
 ):
     model.train()
     total_loss = 0.0
@@ -294,33 +297,46 @@ def train_full_maple_one_epoch(
         data = maybe_dictionarize(data)
         images = data["images"].to(args.device)
         labels = data["labels"].to(args.device)
-        logits = model(images)
+        use_autocast = getattr(args, "use_amp", False) and str(args.device).startswith("cuda")
+        autocast_context = torch.cuda.amp.autocast(enabled=True) if use_autocast else nullcontext()
+        with autocast_context:
+            logits = model(images)
+            if anchor_model is not None and kl_weight != 0.0:
+                with torch.no_grad():
+                    anchor_logits = anchor_model(images)
+                loss_result = compute_maple_cross_entropy(
+                    logits,
+                    labels,
+                    class_weights=class_weights,
+                    anchor_logits=anchor_logits,
+                    kl_weight=kl_weight,
+                    kl_temperature=kl_temperature,
+                    return_components=True,
+                )
+                loss = loss_result.loss
+            else:
+                loss_result = None
+                loss = compute_maple_cross_entropy(logits, labels, class_weights=class_weights)
         if not torch.isfinite(logits).all():
             raise FloatingPointError(f"Full MaPLe produced non-finite logits at epoch {epoch}, batch {batch_index}")
-        if anchor_model is not None and kl_weight != 0.0:
-            with torch.no_grad():
-                anchor_logits = anchor_model(images)
-            loss_result = compute_maple_cross_entropy(
-                logits,
-                labels,
-                class_weights=class_weights,
-                anchor_logits=anchor_logits,
-                kl_weight=kl_weight,
-                kl_temperature=kl_temperature,
-                return_components=True,
-            )
-            loss = loss_result.loss
-        else:
-            loss_result = None
-            loss = compute_maple_cross_entropy(logits, labels, class_weights=class_weights)
         if not torch.isfinite(loss):
             raise FloatingPointError(f"Full MaPLe produced non-finite loss at epoch {epoch}, batch {batch_index}")
         optimizer.zero_grad()
-        loss.backward()
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+        else:
+            loss.backward()
         for name, param in model.named_parameters():
             if param.grad is not None and not torch.isfinite(param.grad).all():
                 raise FloatingPointError(f"Full MaPLe produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
-        optimizer_step(optimizer, args.device)
+        if scaler is not None:
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            optimizer_step(optimizer, args.device)
+        if scheduler is not None:
+            scheduler.step()
         batch_size = labels.shape[0]
         total_loss += loss.item() * batch_size
         total_correct += (logits.argmax(dim=1) == labels).sum().item()

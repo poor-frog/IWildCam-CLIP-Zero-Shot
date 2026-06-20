@@ -160,6 +160,16 @@ class FullMaPLeModuleTest(unittest.TestCase):
 
         pickle.dumps(preprocess)
 
+    def test_full_maple_guard_accepts_vit_b16(self):
+        from src.models.maple_full import CustomFullMaPLeCLIP
+
+        args = self.make_args()
+        args.model = "ViT-B/16"
+
+        model = CustomFullMaPLeCLIP(args, ["frog", "deer"], DummyMaPLeClip())
+
+        self.assertIsInstance(model, CustomFullMaPLeCLIP)
+
     def test_prompt_learner_returns_coupled_shallow_and_deep_prompts(self):
         from src.models.maple_full import FullMaPLePromptLearner
 
@@ -429,6 +439,73 @@ class FullMaPLeModuleTest(unittest.TestCase):
         self.assertIsInstance(kwargs["anchor_model"], FakeAnchor)
         self.assertEqual(kwargs["kl_weight"], args.kl_weight)
         self.assertEqual(kwargs["kl_temperature"], args.kl_temperature)
+
+    def test_build_step_lr_scheduler_warms_up_then_cosine_decays_per_step(self):
+        from src.train_maple_full import build_step_lr_scheduler
+
+        parameter = torch.nn.Parameter(torch.ones(()))
+        optimizer = torch.optim.AdamW([parameter], lr=1.0)
+        args = SimpleNamespace(warmup_length=2, lr_scheduler="cosine")
+
+        scheduler = build_step_lr_scheduler(optimizer, args, total_steps=6)
+
+        observed_lrs = []
+        for _ in range(6):
+            observed_lrs.append(optimizer.param_groups[0]["lr"])
+            optimizer.step()
+            scheduler.step()
+
+        self.assertAlmostEqual(observed_lrs[0], 0.5)
+        self.assertAlmostEqual(observed_lrs[1], 1.0)
+        self.assertLess(observed_lrs[2], observed_lrs[1])
+        self.assertAlmostEqual(observed_lrs[-1], 0.0)
+
+    def test_train_full_maple_one_epoch_uses_scaler_for_amp_step_and_unscales_before_grad_check(self):
+        from src.models.maple_full import train_full_maple_one_epoch
+
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.zeros(2, 2))
+
+            def forward(self, images):
+                return images @ self.weight
+
+        class FakeScaler:
+            def __init__(self):
+                self.calls = []
+
+            def scale(self, loss):
+                self.calls.append("scale")
+                return loss
+
+            def unscale_(self, optimizer):
+                self.calls.append("unscale")
+
+            def step(self, optimizer):
+                self.calls.append("step")
+                optimizer.step()
+
+            def update(self):
+                self.calls.append("update")
+
+        model = TinyModel()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.1, weight_decay=0.0)
+        scaler = FakeScaler()
+        args = SimpleNamespace(device="cpu", max_train_batches=None, use_amp=True)
+        dataloader = [{"images": torch.eye(2), "labels": torch.tensor([0, 1])}]
+
+        train_full_maple_one_epoch(model, dataloader, optimizer, args, epoch=1, scaler=scaler)
+
+        self.assertEqual(scaler.calls, ["scale", "unscale", "step", "update"])
+
+    def test_parse_arguments_accepts_maple_amp_precision(self):
+        from src.config import parse_arguments
+
+        with patch("sys.argv", ["prog", "--maple-precision=amp"]):
+            args = parse_arguments()
+
+        self.assertEqual(args.maple_precision, "amp")
 
     def test_train_maple_lora_configures_separate_entrypoint_defaults(self):
         from src.train_maple_lora import configure_maple_lora_args

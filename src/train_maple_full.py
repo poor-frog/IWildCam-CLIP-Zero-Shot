@@ -1,4 +1,5 @@
 import getpass
+import math
 import os
 import random
 import socket
@@ -103,6 +104,23 @@ def build_class_balanced_ce_weights(train_data, device):
     return torch.as_tensor(weights, dtype=torch.float32, device=device)
 
 
+def build_step_lr_scheduler(optimizer, args, total_steps):
+    warmup_length = max(getattr(args, "warmup_length", 0), 0)
+    scheduler_name = getattr(args, "lr_scheduler", "cosine")
+    total_steps = max(total_steps, 1)
+
+    def lr_lambda(step):
+        if warmup_length > 0 and step < warmup_length:
+            return float(step + 1) / float(warmup_length)
+        progress = float(step - warmup_length + 1) / float(max(total_steps - warmup_length, 1))
+        progress = min(max(progress, 0.0), 1.0)
+        if scheduler_name == "linear":
+            return max(0.0, 1.0 - progress)
+        return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+
 def main(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -149,14 +167,18 @@ def main(args):
 
     trainable_parameters = [param for param in model.parameters() if param.requires_grad]
     optimizer = torch.optim.AdamW(trainable_parameters, lr=args.lr, weight_decay=args.wd)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
+    total_steps = max(args.epochs * len(train_data.train_loader), 1)
+    scheduler = build_step_lr_scheduler(optimizer, args, total_steps)
+    use_amp = getattr(args, "maple_precision", "fp32") == "amp" and str(args.device).startswith("cuda")
+    args.use_amp = use_amp
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp) if use_amp else None
     wandb = init_wandb(args)
     best_score = None
     best_epoch = None
     best_checkpoint_path = resolve_best_checkpoint_path(args)
     val_dataset = None
     if args.val_dataset is not None and args.epochs > 0:
-        val_dataset = build_eval_dataset(args.val_dataset, SimpleNamespaceEncoder(clip_model, preprocess), args)
+        val_dataset = build_eval_dataset(args.val_dataset, SimpleNamespaceEncoder(clip_model, preprocess), args, allow_ood_hp_subsample=True)
 
     is_c1 = kl_weight != 0.0
     if is_c1:
@@ -176,8 +198,9 @@ def main(args):
             kl_weight=kl_weight,
             kl_temperature=kl_temperature,
             desc=train_desc,
+            scheduler=scheduler,
+            scaler=scaler,
         )
-        scheduler.step()
         print(f"Epoch {epoch}: loss={stats.loss:.4f}, acc={stats.accuracy:.4f}")
         if wandb is not None:
             wandb.log({
@@ -232,7 +255,7 @@ def main(args):
     tau_grid = parse_tau_grid(args.logit_adjustment_tau_grid)
     if tau_grid is not None:
         eval_encoder = SimpleNamespaceEncoder(clip_model, preprocess)
-        selection_dataset = build_eval_dataset(args.selection_split, eval_encoder, args)
+        selection_dataset = build_eval_dataset(args.selection_split, eval_encoder, args, allow_ood_hp_subsample=True)
         selection = select_best_tau(
             eval_full_maple_single_dataset,
             model,
