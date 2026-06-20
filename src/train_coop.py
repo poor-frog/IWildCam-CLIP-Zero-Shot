@@ -108,13 +108,17 @@ def resolve_best_checkpoint_path(args):
     return os.path.join("checkpoints", "coop_prompt_learner_best.pt")
 
 
-def build_eval_dataset(dataset_name, clip_encoder, args):
+def build_eval_dataset(dataset_name, clip_encoder, args, allow_ood_hp_subsample=False):
     eval_dataset_class = getattr(datasets, dataset_name)
+    uses_ood_val = allow_ood_hp_subsample and dataset_name in {"IWildCamVal", "IWildCamOODVal"}
     return eval_dataset_class(
         clip_encoder.val_preprocess,
         location=args.data_location,
         batch_size=args.batch_size,
         num_workers=args.workers,
+        n_examples=getattr(args, "num_ood_hp_examples", -1) if uses_ood_val else -1,
+        use_class_balanced=getattr(args, "class_balanced_ood", False) if uses_ood_val else False,
+        seed=getattr(args, "seed", 0),
     )
 
 
@@ -152,7 +156,7 @@ def main(args):
     best_checkpoint_path = resolve_best_checkpoint_path(args)
     val_dataset = None
     if args.val_dataset is not None and args.epochs > 0:
-        val_dataset = build_eval_dataset(args.val_dataset, clip_encoder, args)
+        val_dataset = build_eval_dataset(args.val_dataset, clip_encoder, args, allow_ood_hp_subsample=True)
 
     for epoch in range(1, args.epochs + 1):
         stats = train_one_epoch(model, train_data.train_loader, optimizer, args, epoch, wandb=wandb)
@@ -215,7 +219,7 @@ def main(args):
     selected_tau = args.logit_adjustment_tau
     tau_grid = parse_tau_grid(args.logit_adjustment_tau_grid)
     if tau_grid is not None:
-        selection_dataset = build_eval_dataset(args.selection_split, clip_encoder, args)
+        selection_dataset = build_eval_dataset(args.selection_split, clip_encoder, args, allow_ood_hp_subsample=True)
         selection = select_best_tau(
             eval_coop_single_dataset,
             model,

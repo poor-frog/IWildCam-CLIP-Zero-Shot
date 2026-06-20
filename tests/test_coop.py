@@ -252,6 +252,37 @@ class CoOpModuleTest(unittest.TestCase):
 
         self.assertIs(get_prompt_learner(wrapped), model.prompt_learner)
 
+    def test_build_eval_dataset_subsamples_only_when_allowed(self):
+        import src.datasets as dataset_module
+        from src.train_coop import build_eval_dataset
+
+        calls = []
+
+        class FakeIWildCamVal:
+            def __init__(self, preprocess, **kwargs):
+                calls.append(kwargs)
+
+        args = SimpleNamespace(
+            data_location="./data",
+            batch_size=32,
+            workers=0,
+            num_ood_hp_examples=1000,
+            class_balanced_ood=True,
+            seed=9,
+        )
+        clip_encoder = SimpleNamespace(val_preprocess="preprocess")
+
+        with patch.object(dataset_module, "IWildCamVal", FakeIWildCamVal):
+            build_eval_dataset("IWildCamVal", clip_encoder, args)
+            build_eval_dataset("IWildCamVal", clip_encoder, args, allow_ood_hp_subsample=True)
+
+        self.assertEqual(calls[0]["n_examples"], -1)
+        self.assertFalse(calls[0]["use_class_balanced"])
+        self.assertEqual(calls[1]["n_examples"], 1000)
+        self.assertTrue(calls[1]["use_class_balanced"])
+        self.assertEqual(calls[1]["seed"], 9)
+
+
 
 if __name__ == "__main__":
     unittest.main()

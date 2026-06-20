@@ -3,6 +3,7 @@ import pandas as pd
 import json
 import numpy as np
 import pathlib
+import torch
 
 import wilds
 from wilds.common.data_loaders import get_train_loader, get_eval_loader
@@ -36,6 +37,56 @@ def get_nonempty_subset(dataset, split, frac=1.0, transform=None):
         split_idx = np.sort(np.random.permutation(split_idx)[:num_to_retain])
     subset = WILDSSubset(dataset, split_idx, transform)
     return subset
+
+
+def _to_numpy_labels(labels):
+    if hasattr(labels, "detach"):
+        labels = labels.detach().cpu().numpy()
+    return np.asarray(labels, dtype=np.int64)
+
+
+def sample_indices(labels, n_examples, seed=0, class_balanced=False, num_classes=None):
+    labels = _to_numpy_labels(labels)
+    if n_examples <= 0 or n_examples >= len(labels) and not class_balanced:
+        return np.arange(len(labels), dtype=np.int64)
+    if labels.size == 0:
+        raise ValueError("Cannot sample from an empty label array.")
+
+    rng = np.random.default_rng(seed)
+    if not class_balanced:
+        return np.sort(rng.choice(len(labels), size=n_examples, replace=False)).astype(np.int64)
+
+    if num_classes is None:
+        num_classes = int(labels.max()) + 1
+    present_classes = [class_id for class_id in range(num_classes) if np.any(labels == class_id)]
+    if not present_classes:
+        raise ValueError("Cannot class-balance sample without present classes.")
+
+    base = n_examples // len(present_classes)
+    remainder = n_examples % len(present_classes)
+    selected = []
+    for offset, class_id in enumerate(present_classes):
+        target = base + (1 if offset < remainder else 0)
+        class_indices = np.where(labels == class_id)[0]
+        replace = len(class_indices) < target
+        selected.extend(rng.choice(class_indices, size=target, replace=replace).tolist())
+
+    rng.shuffle(selected)
+    return np.asarray(selected[:n_examples], dtype=np.int64)
+
+
+def maybe_subsample_ood_val(subset, n_examples=-1, seed=0, class_balanced=False, num_classes=None):
+    if n_examples is None or n_examples <= 0:
+        return subset
+    labels = getattr(subset, 'y_array', None)
+    if labels is None:
+        raise ValueError("Cannot subsample OOD validation subset without y_array labels.")
+    collate_fn = getattr(subset, 'collate', None)
+    indices = sample_indices(labels, n_examples, seed=seed, class_balanced=class_balanced, num_classes=num_classes)
+    sampled = torch.utils.data.Subset(subset, indices.tolist())
+    if collate_fn is not None:
+        sampled.collate = collate_fn
+    return sampled
 
 
 def compute_class_counts(labels, num_classes):
@@ -85,7 +136,10 @@ class IWildCam:
                  batch_size=128,
                  num_workers=16,
                  classnames=None,
-                 subset='train'):
+                 subset='train',
+                 n_examples=-1,
+                 use_class_balanced=False,
+                 seed=0):
         self.dataset = wilds.get_dataset(dataset='iwildcam', root_dir=location)
         if remove_non_empty:
             self.train_dataset = get_nonempty_subset(self.dataset, 'train', transform=preprocess)
@@ -97,6 +151,14 @@ class IWildCam:
             self.test_dataset = get_nonempty_subset(self.dataset, subset, transform=preprocess)
         else:
             self.test_dataset = self.dataset.get_subset(subset, transform=preprocess)
+        if subset == 'val':
+            self.test_dataset = maybe_subsample_ood_val(
+                self.test_dataset,
+                n_examples=n_examples,
+                seed=seed,
+                class_balanced=use_class_balanced,
+                num_classes=getattr(self.dataset, 'n_classes', None),
+            )
 
         self.test_loader = get_eval_loader(
             "standard", self.test_dataset,
@@ -120,6 +182,11 @@ class IWildCamIDVal(IWildCam):
         super().__init__(*args, **kwargs)
 
 class IWildCamVal(IWildCam):
+    def __init__(self, *args, **kwargs):
+        kwargs['subset'] = 'val'
+        super().__init__(*args, **kwargs)
+
+class IWildCamOODVal(IWildCam):
     def __init__(self, *args, **kwargs):
         kwargs['subset'] = 'val'
         super().__init__(*args, **kwargs)

@@ -32,6 +32,37 @@ class IWildCamClassPriorTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "empty labels"):
             compute_class_priors([], num_classes=3)
 
+    def test_random_ood_hp_sampling_is_deterministic(self):
+        from src.datasets.iwildcam import sample_indices
+
+        labels = np.arange(20) % 4
+
+        first = sample_indices(labels, n_examples=6, seed=7)
+        second = sample_indices(labels, n_examples=6, seed=7)
+
+        np.testing.assert_array_equal(first, second)
+        self.assertEqual(len(first), 6)
+        self.assertEqual(len(set(first.tolist())), 6)
+
+    def test_class_balanced_ood_hp_sampling_uses_each_present_class(self):
+        from src.datasets.iwildcam import sample_indices
+
+        labels = np.array([0, 0, 0, 1, 1, 1, 2, 2, 2])
+
+        sampled = sample_indices(labels, n_examples=6, seed=3, class_balanced=True, num_classes=3)
+        sampled_labels = labels[sampled]
+
+        np.testing.assert_array_equal(np.bincount(sampled_labels, minlength=3), np.array([2, 2, 2]))
+
+    def test_class_balanced_ood_hp_sampling_returns_requested_count_with_remainder(self):
+        from src.datasets.iwildcam import sample_indices
+
+        labels = np.array([0, 0, 0, 1, 1, 1, 2, 2, 2])
+
+        sampled = sample_indices(labels, n_examples=8, seed=4, class_balanced=True, num_classes=3)
+
+        self.assertEqual(len(sampled), 8)
+
 
 if __name__ == "__main__":
     unittest.main()
