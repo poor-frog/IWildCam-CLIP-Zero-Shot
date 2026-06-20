@@ -3,7 +3,6 @@ import pandas as pd
 import json
 import numpy as np
 import pathlib
-import torch
 
 import wilds
 from wilds.common.data_loaders import get_train_loader, get_eval_loader
@@ -81,12 +80,12 @@ def maybe_subsample_ood_val(subset, n_examples=-1, seed=0, class_balanced=False,
     labels = getattr(subset, 'y_array', None)
     if labels is None:
         raise ValueError("Cannot subsample OOD validation subset without y_array labels.")
-    collate_fn = getattr(subset, 'collate', None)
     indices = sample_indices(labels, n_examples, seed=seed, class_balanced=class_balanced, num_classes=num_classes)
-    sampled = torch.utils.data.Subset(subset, indices.tolist())
-    if collate_fn is not None:
-        sampled.collate = collate_fn
-    return sampled
+    source_indices = getattr(subset, 'indices', None)
+    if source_indices is None:
+        raise ValueError("Cannot subsample OOD validation subset without WILDS source indices.")
+    sampled_indices = np.asarray(source_indices)[indices]
+    return WILDSSubset(subset.dataset, sampled_indices, getattr(subset, 'transform', None))
 
 
 def compute_class_counts(labels, num_classes):

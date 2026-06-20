@@ -1,6 +1,7 @@
 import unittest
 
 import numpy as np
+import torch
 
 
 class IWildCamClassPriorTest(unittest.TestCase):
@@ -62,6 +63,32 @@ class IWildCamClassPriorTest(unittest.TestCase):
         sampled = sample_indices(labels, n_examples=8, seed=4, class_balanced=True, num_classes=3)
 
         self.assertEqual(len(sampled), 8)
+
+    def test_ood_hp_subsampling_preserves_wilds_collate(self):
+        from src.datasets.iwildcam import maybe_subsample_ood_val
+
+        class FakeWildsSubset:
+            def __init__(self):
+                self.y_array = torch.tensor([0, 1, 0, 1])
+                self.indices = np.arange(4)
+                self.dataset = type("FakeDataset", (), {"_collate": staticmethod(self.collate_batch)})()
+                self.transform = "transform"
+                self.collate = self.collate_batch
+
+            @staticmethod
+            def collate_batch(batch):
+                return batch
+
+            def __len__(self):
+                return len(self.y_array)
+
+        subset = FakeWildsSubset()
+
+        sampled = maybe_subsample_ood_val(subset, n_examples=2, seed=0)
+
+        self.assertNotIsInstance(sampled, torch.utils.data.Subset)
+        self.assertTrue(hasattr(sampled, "collate"))
+        self.assertIsNotNone(sampled.collate)
 
 
 if __name__ == "__main__":
