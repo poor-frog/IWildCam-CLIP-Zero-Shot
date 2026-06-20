@@ -163,6 +163,37 @@ class KaggleMainTest(unittest.TestCase):
 
         self.assertEqual(calls[0][-3:], ["-e", str(repo_root), "--no-deps"])
 
+    def test_assert_cloned_repo_supports_runtime_flags_rejects_stale_config(self):
+        from kaggle_main import assert_cloned_repo_supports_runtime_flags
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            config_path = repo_root / "src" / "config.py"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(
+                'parser.add_argument("--maple-precision", choices=["fp32"])\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "cloned repo is stale"):
+                assert_cloned_repo_supports_runtime_flags(repo_root)
+
+    def test_assert_cloned_repo_supports_runtime_flags_accepts_current_config(self):
+        from kaggle_main import assert_cloned_repo_supports_runtime_flags
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            config_path = repo_root / "src" / "config.py"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(
+                'parser.add_argument("--lr-scheduler")\n'
+                'parser.add_argument("--warmup-length")\n'
+                'parser.add_argument("--maple-precision", choices=["fp32", "amp"])\n',
+                encoding="utf-8",
+            )
+
+            assert_cloned_repo_supports_runtime_flags(repo_root)
+
     def test_configure_import_path_adds_repo_root_to_python_imports(self):
         from kaggle_main import configure_import_path
 
@@ -236,6 +267,7 @@ class KaggleMainTest(unittest.TestCase):
                      mock.patch.object(kaggle_main, "configure_import_path", side_effect=lambda root: calls.append("path")), \
                      mock.patch.object(kaggle_main, "_ensure_deps", side_effect=lambda: calls.append("deps")), \
                      mock.patch.object(kaggle_main, "_ensure_local_package_installed", side_effect=lambda root: calls.append("install")), \
+                     mock.patch.object(kaggle_main, "assert_cloned_repo_supports_runtime_flags", side_effect=lambda root: calls.append("guard")), \
                      mock.patch.object(kaggle_main, "_patch_iwildcam_val", side_effect=lambda: calls.append("patch")), \
                      mock.patch.object(kaggle_main, "_configure_wandb_from_kaggle_secret", side_effect=lambda: calls.append("wandb")), \
                      mock.patch.object(kaggle_main, "prepare_iwildcam_layout", return_value="./data"), \
@@ -246,6 +278,7 @@ class KaggleMainTest(unittest.TestCase):
 
         self.assertLess(calls.index("deps"), calls.index("patch"))
         self.assertLess(calls.index("install"), calls.index("patch"))
+        self.assertLess(calls.index("guard"), calls.index("patch"))
         self.assertLess(calls.index("patch"), calls.index("run_coop"))
 
     def test_build_coop_training_argv_preserves_user_overrides(self):
@@ -264,15 +297,15 @@ class KaggleMainTest(unittest.TestCase):
 
         argv = build_maple_cbce_training_argv("./data")
 
-        self.assertIn("--model=ViT-B/32", argv)
+        self.assertIn("--model=ViT-B/16", argv)
         self.assertIn("--train-dataset=IWildCam", argv)
         self.assertIn("--data-location=./data", argv)
         self.assertIn("--eval-datasets=IWildCamVal", argv)
         self.assertIn("--val-dataset=IWildCamVal", argv)
         self.assertNotIn("--class-balanced-ce", argv)
         self.assertIn("--wandb", argv)
-        self.assertIn("--wandb-run-name=a1-maple-cbce-iwildcamval", argv)
-        self.assertIn("--save=/kaggle/working/checkpoints/a1_maple_cbce_iwildcamval.pt", argv)
+        self.assertIn("--wandb-run-name=a1-maple-cbce-vit-b16-bs256-iwildcamval", argv)
+        self.assertIn("--save=/kaggle/working/checkpoints/a1_maple_cbce_vitb16_bs256_iwildcamval.pt", argv)
         self.assertNotIn("--eval-datasets=IWildCamIDVal,IWildCamID,IWildCamOOD", argv)
 
     def test_build_maple_cbce_training_argv_preserves_protocol_overrides(self):
@@ -284,21 +317,21 @@ class KaggleMainTest(unittest.TestCase):
         self.assertIn("--no-wandb", argv)
         self.assertIn("--save=/tmp/a1.pt", argv)
         self.assertNotIn("--wandb", argv)
-        self.assertNotIn("--save=/kaggle/working/checkpoints/a1_maple_cbce_iwildcamval.pt", argv)
+        self.assertNotIn("--save=/kaggle/working/checkpoints/a1_maple_cbce_vitb16_bs256_iwildcamval.pt", argv)
 
     def test_build_maple_tau_sweep_eval_argv_uses_vanilla_maple_tau_defaults(self):
         from kaggle_main import build_maple_tau_sweep_eval_argv
 
         argv = build_maple_tau_sweep_eval_argv("./data")
 
-        self.assertIn("--model=ViT-B/32", argv)
+        self.assertIn("--model=ViT-B/16", argv)
         self.assertIn("--train-dataset=IWildCam", argv)
         self.assertIn("--eval-datasets=IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD", argv)
         self.assertIn("--data-location=./data", argv)
         self.assertIn("--epochs=0", argv)
         self.assertIn("--selection-split=IWildCamVal", argv)
         self.assertIn("--logit-adjustment-tau-grid=0,0.25,0.5,0.75,1,1.5,2", argv)
-        self.assertIn("--wandb-run-name=maple-vanilla-tau-sweep-iwildcamval", argv)
+        self.assertIn("--wandb-run-name=maple-vanilla-vit-b16-bs256-tau-sweep-iwildcamval", argv)
         self.assertNotIn("--class-balanced-ce", argv)
 
     def test_build_maple_tau_sweep_eval_argv_preserves_checkpoint_and_tau_overrides(self):
@@ -322,13 +355,16 @@ class KaggleMainTest(unittest.TestCase):
 
         argv = build_maple_lora_training_argv("./data")
 
-        self.assertIn("--model=ViT-B/32", argv)
+        self.assertIn("--model=ViT-B/16", argv)
         self.assertIn("--data-location=./data", argv)
         self.assertIn("--maple-lora-rank=4", argv)
         self.assertIn("--maple-lora-alpha=8", argv)
         self.assertIn("--maple-lora-layers=last6", argv)
-        self.assertIn("--wandb-run-name=maple-lora-vit-b32-r4-last6-e3-lr1e-3", argv)
-        self.assertIn("--save=./checkpoints/maple_lora_r4_last6_e3_lr1e-3.pt", argv)
+        self.assertIn("--wandb-run-name=maple-lora-vit-b16-bs256-r4-last6-e20-lr1e-5", argv)
+        self.assertIn("--save=./checkpoints/maple_lora_vitb16_bs256_r4_last6_e20_lr1e-5.pt", argv)
+        self.assertIn("--maple-precision=amp", argv)
+        self.assertIn("--lr-scheduler=cosine", argv)
+        self.assertIn("--warmup-length=500", argv)
 
 
     def test_build_c1_training_argv_uses_c1_protocol_defaults(self):
@@ -336,22 +372,25 @@ class KaggleMainTest(unittest.TestCase):
 
         argv = build_c1_training_argv("./data")
 
-        self.assertIn("--model=ViT-B/32", argv)
+        self.assertIn("--model=ViT-B/16", argv)
         self.assertIn("--train-dataset=IWildCam", argv)
         self.assertIn("--eval-datasets=IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD", argv)
         self.assertIn("--data-location=./data", argv)
-        self.assertIn("--batch-size=32", argv)
+        self.assertIn("--batch-size=256", argv)
         self.assertIn("--maple-lora-rank=4", argv)
         self.assertIn("--maple-lora-alpha=8", argv)
         self.assertIn("--maple-lora-layers=last6", argv)
         self.assertNotIn("--class-balanced-ce", argv)
-        self.assertIn("--epochs=9", argv)
+        self.assertIn("--epochs=20", argv)
+        self.assertIn("--maple-precision=amp", argv)
+        self.assertIn("--lr-scheduler=cosine", argv)
+        self.assertIn("--warmup-length=500", argv)
         self.assertNotIn("--kl-weight=0.1", argv)
         self.assertNotIn("--kl-temperature=1.0", argv)
         self.assertIn("--val-dataset=IWildCamVal", argv)
         self.assertIn("--best-metric=F1-macro_all", argv)
-        self.assertIn("--wandb-run-name=c1-maple-lora-cbce-kl-vit-b32-bs32", argv)
-        self.assertIn("--save=/kaggle/working/checkpoints/c1_maple_lora_cbce_kl_vitb32_bs32.pt", argv)
+        self.assertIn("--wandb-run-name=c1-maple-lora-kl-vit-b16-bs256", argv)
+        self.assertIn("--save=/kaggle/working/checkpoints/c1_maple_lora_kl_vitb16_bs256.pt", argv)
         self.assertIn("--wandb", argv)
 
     def test_build_c1_training_argv_preserves_overrides(self):
@@ -368,11 +407,40 @@ class KaggleMainTest(unittest.TestCase):
         self.assertIn("--epochs=1", argv)
         self.assertIn("--no-wandb", argv)
         self.assertIn("--save=/tmp/c1.pt", argv)
-        self.assertNotIn("--batch-size=32", argv)
-        self.assertNotIn("--epochs=9", argv)
+        self.assertNotIn("--batch-size=256", argv)
+        self.assertNotIn("--epochs=20", argv)
         self.assertNotIn("--kl-weight=0.1", argv)
         self.assertNotIn("--wandb", argv)
-        self.assertNotIn("--save=/kaggle/working/checkpoints/c1_maple_lora_cbce_kl_vitb32_bs32.pt", argv)
+        self.assertNotIn("--save=/kaggle/working/checkpoints/c1_maple_lora_kl_vitb16_bs256.pt", argv)
+
+    def test_build_c1_autoft_training_argv_uses_1k_oodval_defaults(self):
+        from kaggle_main import build_c1_autoft_training_argv
+
+        argv = build_c1_autoft_training_argv("./data")
+
+        self.assertIn("--model=ViT-B/16", argv)
+        self.assertIn("--data-location=./data", argv)
+        self.assertIn("--val-dataset=IWildCamOODVal", argv)
+        self.assertIn("--num-ood-hp-examples=1000", argv)
+        self.assertIn("--class-balanced-ood", argv)
+        self.assertIn("--wandb-run-name=c1-autoft-1k-oodval-vit-b16-bs256", argv)
+        self.assertIn("--save=/kaggle/working/checkpoints/c1_autoft_1k_oodval_vitb16_bs256.pt", argv)
+
+    def test_build_c1_autoft_training_argv_preserves_overrides(self):
+        from kaggle_main import build_c1_autoft_training_argv
+
+        argv = build_c1_autoft_training_argv("./data", [
+            "--val-dataset=IWildCamVal",
+            "--num-ood-hp-examples=200",
+            "--no-class-balanced-ood",
+        ])
+
+        self.assertIn("--val-dataset=IWildCamVal", argv)
+        self.assertIn("--num-ood-hp-examples=200", argv)
+        self.assertIn("--no-class-balanced-ood", argv)
+        self.assertNotIn("--val-dataset=IWildCamOODVal", argv)
+        self.assertNotIn("--num-ood-hp-examples=1000", argv)
+        self.assertNotIn("--class-balanced-ood", argv)
 
     def test_train_maple_full_imports_without_removed_shallow_module(self):
         import src.train_maple_full as train_maple_full

@@ -24,7 +24,7 @@ COOP_DEFAULTS = {
     "--epochs": "15",
     "--lr": "0.002",
     "--wd": "1e-5",
-    "--val-dataset": "IWildCamIDVal",
+    "--val-dataset": "IWildCamVal",
     "--best-metric": "F1-macro_all",
     "--wandb-project": "PoorFrogs",
     "--wandb-run-name": "coop-vit-b32-phase11-best-f1",
@@ -33,21 +33,26 @@ COOP_DEFAULTS = {
 COOP_DEFAULT_FLAGS = ["--wandb"]
 
 FULL_MAPLE_DEFAULTS = {
-    "--model": "ViT-B/32",
+    "--model": "ViT-B/16",
     "--train-dataset": "IWildCam",
     "--eval-datasets": "IWildCamIDVal,IWildCamID,IWildCamOOD",
-    "--batch-size": "32",
+    "--batch-size": "256",
     "--workers": "4",
     "--n-ctx": "2",
-    "--epochs": "9",
-    "--lr": "0.002",
-    "--wd": "1e-5",
-    "--val-dataset": "IWildCamIDVal",
+    "--ctx-init": "a photo of a",
+    "--epochs": "20",
+    "--lr": "1e-5",
+    "--wd": "0.2",
+    "--lr-scheduler": "cosine",
+    "--warmup-length": "500",
+    "--maple-precision": "amp",
+    "--template": "iwildcam_template",
+    "--val-dataset": "IWildCamVal",
     "--best-metric": "F1-macro_all",
     "--maple-prompt-depth": "9",
     "--wandb-project": "PoorFrogs",
-    "--wandb-run-name": "maple-full-vit-b32",
-    "--save": "./checkpoints/maple_full_prompt_learner.pt",
+    "--wandb-run-name": "maple-full-vit-b16-bs256-iwildcamval",
+    "--save": "./checkpoints/maple_full_prompt_learner_vitb16_bs256_iwildcamval.pt",
 }
 FULL_MAPLE_DEFAULT_FLAGS = ["--wandb"]
 
@@ -55,8 +60,8 @@ MAPLE_CBCE_DEFAULTS = {
     **FULL_MAPLE_DEFAULTS,
     "--eval-datasets": "IWildCamVal",
     "--val-dataset": "IWildCamVal",
-    "--wandb-run-name": "a1-maple-cbce-iwildcamval",
-    "--save": "/kaggle/working/checkpoints/a1_maple_cbce_iwildcamval.pt",
+    "--wandb-run-name": "a1-maple-cbce-vit-b16-bs256-iwildcamval",
+    "--save": "/kaggle/working/checkpoints/a1_maple_cbce_vitb16_bs256_iwildcamval.pt",
 }
 MAPLE_CBCE_FLAGS = ["--wandb"]
 
@@ -66,35 +71,39 @@ MAPLE_TAU_SWEEP_EVAL_DEFAULTS = {
     "--epochs": "0",
     "--selection-split": "IWildCamVal",
     "--logit-adjustment-tau-grid": "0,0.25,0.5,0.75,1,1.5,2",
-    "--wandb-run-name": "maple-vanilla-tau-sweep-iwildcamval",
+    "--wandb-run-name": "maple-vanilla-vit-b16-bs256-tau-sweep-iwildcamval",
     "--load": "/kaggle/input/maple-vanilla-checkpoint/maple_full_prompt_learner_best.pt",
 }
 MAPLE_TAU_SWEEP_EVAL_FLAGS = ["--wandb"]
 
 MAPLE_LORA_DEFAULTS = {
     **FULL_MAPLE_DEFAULTS,
-    "--epochs": "3",
-    "--lr": "0.001",
     "--maple-lora-rank": "4",
     "--maple-lora-alpha": "8",
     "--maple-lora-layers": "last6",
-    "--wandb-run-name": "maple-lora-vit-b32-r4-last6-e3-lr1e-3",
-    "--save": "./checkpoints/maple_lora_r4_last6_e3_lr1e-3.pt",
+    "--wandb-run-name": "maple-lora-vit-b16-bs256-r4-last6-e20-lr1e-5",
+    "--save": "./checkpoints/maple_lora_vitb16_bs256_r4_last6_e20_lr1e-5.pt",
 }
 MAPLE_LORA_DEFAULT_FLAGS = ["--wandb"]
 
 C1_DEFAULTS = {
     **MAPLE_LORA_DEFAULTS,
     "--eval-datasets": "IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
-    "--batch-size": "32",
-    "--epochs": "3",
     "--val-dataset": "IWildCamVal",
     "--best-metric": "F1-macro_all",
-    "--template": "iwildcam_template",
-    "--wandb-run-name": "c1-maple-lora-kl-vit-b32-bs32",
-    "--save": "/kaggle/working/checkpoints/c1_maple_lora_kl_vitb32_bs32.pt",
+    "--wandb-run-name": "c1-maple-lora-kl-vit-b16-bs256",
+    "--save": "/kaggle/working/checkpoints/c1_maple_lora_kl_vitb16_bs256.pt",
 }
 C1_DEFAULT_FLAGS = ["--wandb"]
+
+C1_AUTOFT_DEFAULTS = {
+    **C1_DEFAULTS,
+    "--val-dataset": "IWildCamOODVal",
+    "--num-ood-hp-examples": "1000",
+    "--wandb-run-name": "c1-autoft-1k-oodval-vit-b16-bs256",
+    "--save": "/kaggle/working/checkpoints/c1_autoft_1k_oodval_vitb16_bs256.pt",
+}
+C1_AUTOFT_DEFAULT_FLAGS = ["--wandb", "--class-balanced-ood"]
 C1_KL_WEIGHT = 0.1
 C1_KL_TEMPERATURE = 1.0
 
@@ -339,6 +348,24 @@ def build_maple_lora_training_argv(data_location, user_args=None):
     return argv
 
 
+def build_c1_autoft_training_argv(data_location, user_args=None):
+    user_args = user_args or []
+    argv = ["kaggle_main.py"]
+    provided = _provided_option_names([argv[0], *user_args])
+
+    defaults = {**C1_AUTOFT_DEFAULTS, "--data-location": data_location}
+    for name, value in defaults.items():
+        if name not in provided:
+            argv.append(f"{name}={value}")
+
+    for flag in C1_AUTOFT_DEFAULT_FLAGS:
+        if flag not in provided and f"--no-{flag[2:]}" not in provided:
+            argv.append(flag)
+
+    argv.extend(user_args)
+    return argv
+
+
 def build_c1_training_argv(data_location, user_args=None):
     user_args = user_args or []
     argv = ["kaggle_main.py"]
@@ -376,6 +403,25 @@ def _ensure_local_package_installed(repo_root, check_call=subprocess.check_call)
     if not is_project_root(repo_root):
         return
     check_call([sys.executable, "-m", "pip", "install", "-q", "-e", str(repo_root), "--no-deps"])
+
+
+def assert_cloned_repo_supports_runtime_flags(repo_root):
+    config_path = Path(repo_root) / "src" / "config.py"
+    if not config_path.exists():
+        raise RuntimeError(f"The cloned repo is stale or incomplete: missing {config_path}.")
+    config_text = config_path.read_text(encoding="utf-8")
+    required_fragments = (
+        "--lr-scheduler",
+        "--warmup-length",
+        '"amp"',
+    )
+    missing = [fragment for fragment in required_fragments if fragment not in config_text]
+    if missing:
+        raise RuntimeError(
+            "The cloned repo is stale and does not support the current Kaggle MaPLe/C1 flags "
+            f"{missing}. Push the latest PoorFrogs code or set DEFAULT_GITHUB_REPO to a branch/commit "
+            "that includes --maple-precision=amp, --lr-scheduler, and --warmup-length before rerunning."
+        )
 
 
 def _configure_wandb_from_kaggle_secret():
@@ -421,13 +467,14 @@ def main():
     configure_import_path(repo_root)
 
     mode = parse_mode(sys.argv)
-    if mode not in ("coop", "full_maple", "maple_cbce", "maple_tau_sweep", "maple_lora", "c1"):
+    if mode not in ("coop", "full_maple", "maple_cbce", "maple_tau_sweep", "maple_lora", "c1", "c1_autoft"):
         raise ValueError(
-            f"Unknown mode: {mode}. Use --mode=coop, --mode=full_maple, --mode=maple_cbce, --mode=maple_tau_sweep, --mode=maple_lora, or --mode=c1."
+            f"Unknown mode: {mode}. Use --mode=coop, --mode=full_maple, --mode=maple_cbce, --mode=maple_tau_sweep, --mode=maple_lora, --mode=c1, or --mode=c1_autoft."
         )
 
     _ensure_deps()
     _ensure_local_package_installed(repo_root)
+    assert_cloned_repo_supports_runtime_flags(repo_root)
     _patch_iwildcam_val()
     _configure_wandb_from_kaggle_secret()
     data_location = prepare_iwildcam_layout(repo_root)
@@ -465,6 +512,17 @@ def main():
         from src.train_maple_lora import configure_maple_lora_args
         from src.train_maple_full import main as run_maple_full
         run_maple_full(configure_maple_lora_args(parse_arguments()))
+    elif mode == "c1_autoft":
+        sys.argv = build_c1_autoft_training_argv(data_location, user_args)
+        print("Running Kaggle C1 AutoFT-style 1k OODVal MaPLe + LoRA + KL training with arguments:")
+        print(" ".join(sys.argv[1:]))
+        from src.config import parse_arguments
+        from src.train_maple_lora import configure_maple_lora_args
+        from src.train_maple_full import main as run_maple_full
+        args = configure_maple_lora_args(parse_arguments())
+        args.kl_weight = float(os.environ.get("C1_KL_WEIGHT", C1_KL_WEIGHT))
+        args.kl_temperature = float(os.environ.get("C1_KL_TEMPERATURE", C1_KL_TEMPERATURE))
+        run_maple_full(args)
     elif mode == "c1":
         sys.argv = build_c1_training_argv(data_location, user_args)
         print("Running Kaggle C1 MaPLe + LoRA + KL training with arguments:")
