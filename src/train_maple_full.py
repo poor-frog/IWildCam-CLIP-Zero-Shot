@@ -171,7 +171,7 @@ def main(args):
     scheduler = build_step_lr_scheduler(optimizer, args, total_steps)
     use_amp = getattr(args, "maple_precision", "fp32") == "amp" and str(args.device).startswith("cuda")
     args.use_amp = use_amp
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp) if use_amp else None
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_amp else None
     wandb = init_wandb(args)
     best_score = None
     best_epoch = None

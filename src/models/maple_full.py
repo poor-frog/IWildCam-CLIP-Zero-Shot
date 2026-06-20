@@ -298,7 +298,7 @@ def train_full_maple_one_epoch(
         images = data["images"].to(args.device)
         labels = data["labels"].to(args.device)
         use_autocast = getattr(args, "use_amp", False) and str(args.device).startswith("cuda")
-        autocast_context = torch.cuda.amp.autocast(enabled=True) if use_autocast else nullcontext()
+        autocast_context = torch.amp.autocast("cuda", enabled=True) if use_autocast else nullcontext()
         with autocast_context:
             logits = model(images)
             if anchor_model is not None and kl_weight != 0.0:
@@ -327,15 +327,20 @@ def train_full_maple_one_epoch(
             scaler.unscale_(optimizer)
         else:
             loss.backward()
-        for name, param in model.named_parameters():
-            if param.grad is not None and not torch.isfinite(param.grad).all():
-                raise FloatingPointError(f"Full MaPLe produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
+        if scaler is None:
+            for name, param in model.named_parameters():
+                if param.grad is not None and not torch.isfinite(param.grad).all():
+                    raise FloatingPointError(f"Full MaPLe produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
+        previous_scale = scaler.get_scale() if scaler is not None and hasattr(scaler, "get_scale") else None
         if scaler is not None:
             scaler.step(optimizer)
             scaler.update()
+            current_scale = scaler.get_scale() if hasattr(scaler, "get_scale") else previous_scale
+            optimizer_was_skipped = previous_scale is not None and current_scale < previous_scale
         else:
             optimizer_step(optimizer, args.device)
-        if scheduler is not None:
+            optimizer_was_skipped = False
+        if scheduler is not None and not optimizer_was_skipped:
             scheduler.step()
         batch_size = labels.shape[0]
         total_loss += loss.item() * batch_size

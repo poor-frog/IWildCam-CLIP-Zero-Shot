@@ -499,6 +499,59 @@ class FullMaPLeModuleTest(unittest.TestCase):
 
         self.assertEqual(scaler.calls, ["scale", "unscale", "step", "update"])
 
+    def test_train_full_maple_one_epoch_lets_grad_scaler_skip_non_finite_amp_step(self):
+        from src.models.maple_full import train_full_maple_one_epoch
+
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.zeros(2, 2))
+                self.weight.register_hook(lambda grad: torch.full_like(grad, float("inf")))
+
+            def forward(self, images):
+                return images @ self.weight
+
+        class FakeSkippingScaler:
+            def __init__(self):
+                self.calls = []
+                self.scale_value = 8.0
+
+            def scale(self, loss):
+                self.calls.append("scale")
+                return loss
+
+            def unscale_(self, optimizer):
+                self.calls.append("unscale")
+
+            def get_scale(self):
+                return self.scale_value
+
+            def step(self, optimizer):
+                self.calls.append("step")
+
+            def update(self):
+                self.calls.append("update")
+                self.scale_value = 4.0
+
+        class FakeScheduler:
+            def __init__(self):
+                self.steps = 0
+
+            def step(self):
+                self.steps += 1
+
+        model = TinyModel()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.1, weight_decay=0.0)
+        scaler = FakeSkippingScaler()
+        scheduler = FakeScheduler()
+        args = SimpleNamespace(device="cpu", max_train_batches=None, use_amp=True)
+        dataloader = [{"images": torch.eye(2), "labels": torch.tensor([0, 1])}]
+
+        train_full_maple_one_epoch(model, dataloader, optimizer, args, epoch=1, scaler=scaler, scheduler=scheduler)
+
+        self.assertEqual(scaler.calls, ["scale", "unscale", "step", "update"])
+        self.assertEqual(scheduler.steps, 0)
+
     def test_parse_arguments_accepts_maple_amp_precision(self):
         from src.config import parse_arguments
 
