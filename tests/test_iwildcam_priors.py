@@ -90,6 +90,39 @@ class IWildCamClassPriorTest(unittest.TestCase):
         self.assertTrue(hasattr(sampled, "collate"))
         self.assertIsNotNone(sampled.collate)
 
+    def test_apply_class_bias_adds_per_class_offsets(self):
+        from src.models.logit_adjustment import apply_class_bias
+
+        logits = torch.tensor([[1.0, 2.0, 3.0]])
+        class_bias = torch.tensor([0.5, -1.0, 2.0])
+
+        adjusted = apply_class_bias(logits, class_bias)
+
+        self.assertTrue(torch.equal(adjusted, torch.tensor([[1.5, 1.0, 5.0]])))
+
+    def test_select_best_class_bias_prefers_macro_f1_candidate(self):
+        from src.models.logit_adjustment import select_best_class_bias
+
+        class TinyDataset:
+            test_loader = [{"images": torch.zeros(3, 1), "labels": torch.tensor([0, 1, 1])}]
+
+        class TinyModel(torch.nn.Module):
+            def forward(self, images):
+                return torch.tensor([
+                    [2.0, 0.0],
+                    [2.0, 1.0],
+                    [2.0, 1.0],
+                ])
+
+        args = type("Args", (), {"device": "cpu", "max_eval_batches": None, "selection_split": "IWildCamVal"})()
+        candidates = [torch.tensor([0.0, 0.0]), torch.tensor([-1.0, 1.0])]
+
+        selection = select_best_class_bias(TinyModel(), TinyDataset(), args, candidates)
+
+        self.assertEqual(selection.best_index, 1)
+        self.assertTrue(torch.equal(selection.best_bias, candidates[1].float()))
+        self.assertEqual(selection.rows[1]["F1-macro_all"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

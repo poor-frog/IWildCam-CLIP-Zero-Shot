@@ -326,6 +326,21 @@ class FullMaPLeModuleTest(unittest.TestCase):
 
         self.assertEqual(parametrized_weight.device.type, "mps")
 
+    def test_lora_weight_parametrization_applies_gamma_to_delta_only(self):
+        from src.models.maple_lora import LoRAWeightParametrization
+
+        parametrization = LoRAWeightParametrization(out_features=2, in_features=2, rank=1, alpha=1)
+        with torch.no_grad():
+            parametrization.lora_down.weight.copy_(torch.tensor([[2.0, 3.0]]))
+            parametrization.lora_up.weight.copy_(torch.tensor([[5.0], [7.0]]))
+        original_weight = torch.ones(2, 2)
+
+        parametrization.set_gamma(0.25)
+        parametrized_weight = parametrization(original_weight)
+
+        expected_delta = torch.tensor([[10.0, 15.0], [14.0, 21.0]])
+        self.assertTrue(torch.equal(parametrized_weight, original_weight + 0.25 * expected_delta))
+
 
     def test_train_maple_full_main_builds_zero_shot_anchor_when_kl_enabled(self):
         import src.datasets as datasets
@@ -356,19 +371,6 @@ class FullMaPLeModuleTest(unittest.TestCase):
             def __init__(self):
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones([]))
-
-        class FakeAnchor(torch.nn.Module):
-            def __init__(self, image_encoder, classification_head):
-                super().__init__()
-                self.image_encoder = image_encoder
-                self.classification_head = classification_head
-
-        class FakeAnchorImageEncoder(torch.nn.Module):
-            def __init__(self, image_encoder, n_ctx, prompt_depth):
-                super().__init__()
-                self.image_encoder = image_encoder
-                self.n_ctx = n_ctx
-                self.prompt_depth = prompt_depth
 
         args = SimpleNamespace(
             seed=0,
@@ -403,7 +405,7 @@ class FullMaPLeModuleTest(unittest.TestCase):
         )
         clip_model = TinyClip()
         maple_model = TinyMapleModel()
-        classification_head = torch.nn.Linear(1, 2)
+        clean_anchor = SimpleNamespace(name="clean_anchor")
         train_calls = []
 
         def fake_train_full_maple_one_epoch(*call_args, **kwargs):
@@ -414,9 +416,7 @@ class FullMaPLeModuleTest(unittest.TestCase):
              patch.object(train_maple_full.maple_clip, "load", return_value=(clip_model, "preprocess")), \
              patch.object(train_maple_full, "CustomFullMaPLeCLIP", return_value=maple_model), \
              patch.object(train_maple_full, "maybe_data_parallel", side_effect=lambda model, args: model), \
-             patch.object(train_maple_full, "get_compatible_zeroshot_classifier", return_value=classification_head) as get_classifier, \
-             patch.object(train_maple_full, "MaPLeZeroPromptImageEncoder", side_effect=FakeAnchorImageEncoder) as image_encoder_cls, \
-             patch.object(train_maple_full, "FrozenZeroShotAnchor", side_effect=FakeAnchor) as anchor_cls, \
+             patch.object(train_maple_full, "build_frozen_zeroshot_anchor", return_value=clean_anchor) as build_anchor, \
              patch.object(train_maple_full, "train_full_maple_one_epoch", side_effect=fake_train_full_maple_one_epoch), \
              patch.object(train_maple_full, "build_train_class_priors_for_dataset", return_value=(None, torch.ones(2))), \
              patch.object(train_maple_full, "print_summary"), \
@@ -424,21 +424,103 @@ class FullMaPLeModuleTest(unittest.TestCase):
             train_maple_full.main(args)
 
         self.assertFalse(hasattr(train_maple_full, "get_zeroshot_classifier"))
-        get_classifier.assert_called_once_with(args, device=args.device)
-        image_encoder_cls.assert_called_once_with(
-            clip_model.visual,
-            n_ctx=args.n_ctx,
-            prompt_depth=args.maple_prompt_depth,
-        )
-        anchor_cls.assert_called_once()
-        anchor_image_encoder, anchor_head = anchor_cls.call_args.args
-        self.assertIsInstance(anchor_image_encoder, FakeAnchorImageEncoder)
-        self.assertIs(anchor_head, classification_head)
+        self.assertFalse(hasattr(train_maple_full, "get_compatible_zeroshot_classifier"))
+        self.assertFalse(hasattr(train_maple_full, "MaPLeZeroPromptImageEncoder"))
+        build_anchor.assert_called_once_with(args, device=args.device)
         self.assertEqual(len(train_calls), 1)
         _, kwargs = train_calls[0]
-        self.assertIsInstance(kwargs["anchor_model"], FakeAnchor)
+        self.assertIs(kwargs["anchor_model"], clean_anchor)
         self.assertEqual(kwargs["kl_weight"], args.kl_weight)
         self.assertEqual(kwargs["kl_temperature"], args.kl_temperature)
+
+    def test_train_maple_full_main_builds_clean_zero_shot_anchor_when_kl_enabled(self):
+        import src.datasets as datasets
+        import src.train_maple_full as train_maple_full
+
+        class TinyClip(torch.nn.Module):
+            dtype = torch.float32
+
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+                self.visual = torch.nn.Identity()
+                self.logit_scale = torch.nn.Parameter(torch.ones([]))
+
+            def float(self):
+                return self
+
+            def to(self, device):
+                return self
+
+            def eval(self):
+                return self
+
+        class TinyTrainData:
+            classnames = ["frog", "deer"]
+            train_loader = []
+
+            def __init__(self, preprocess, location, batch_size, num_workers):
+                self.dataset = SimpleNamespace(get_subset=lambda split, transform=None: SimpleNamespace(y_array=torch.tensor([0, 1])))
+
+        class TinyMapleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones([]))
+
+        args = SimpleNamespace(
+            seed=0,
+            maple_prompt_depth=1,
+            n_ctx=2,
+            model="ViT-B/32",
+            maple_precision="fp32",
+            device=torch.device("cpu"),
+            train_dataset="TinyTrainData",
+            data_location="/tmp/unused",
+            batch_size=2,
+            workers=0,
+            load=None,
+            class_balanced_ce=False,
+            lr=0.01,
+            wd=0.0,
+            epochs=1,
+            wandb=False,
+            wandb_project="PoorFrogs",
+            wandb_entity=None,
+            wandb_run_name=None,
+            best_checkpoint=None,
+            save=None,
+            val_dataset=None,
+            eval_datasets=None,
+            no_load_best_for_eval=False,
+            logit_adjustment_tau=None,
+            logit_adjustment_tau_grid=None,
+            selection_split="IWildCamVal",
+            kl_weight=0.25,
+            kl_temperature=2.0,
+            class_bias_calibration=False,
+            maple_lora_gamma=1.0,
+        )
+        student_clip = TinyClip("student")
+        clean_anchor = SimpleNamespace(name="clean_anchor")
+        train_calls = []
+
+        def fake_train_full_maple_one_epoch(*call_args, **kwargs):
+            train_calls.append(kwargs)
+            return SimpleNamespace(loss=0.5, accuracy=1.0)
+
+        with patch.object(datasets, "TinyTrainData", TinyTrainData, create=True), \
+             patch.object(train_maple_full.maple_clip, "load", return_value=(student_clip, "preprocess")), \
+             patch.object(train_maple_full, "CustomFullMaPLeCLIP", return_value=TinyMapleModel()), \
+             patch.object(train_maple_full, "maybe_data_parallel", side_effect=lambda model, args: model), \
+             patch.object(train_maple_full, "build_frozen_zeroshot_anchor", return_value=clean_anchor) as build_anchor, \
+             patch.object(train_maple_full, "train_full_maple_one_epoch", side_effect=fake_train_full_maple_one_epoch), \
+             patch.object(train_maple_full, "build_train_class_priors_for_dataset", return_value=(None, torch.ones(2))), \
+             patch.object(train_maple_full, "print_summary"), \
+             patch.object(train_maple_full, "log_wandb_summary"):
+            train_maple_full.main(args)
+
+        build_anchor.assert_called_once_with(args, device=args.device)
+        self.assertIs(train_calls[0]["anchor_model"], clean_anchor)
 
     def test_build_step_lr_scheduler_warms_up_then_cosine_decays_per_step(self):
         from src.train_maple_full import build_step_lr_scheduler

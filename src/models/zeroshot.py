@@ -27,6 +27,18 @@ class FrozenZeroShotAnchor(torch.nn.Module):
             return self.classification_head(features)
 
 
+class FrozenCLIPImageEncoder(torch.nn.Module):
+    def __init__(self, clip_model):
+        super().__init__()
+        self.clip_model = clip_model
+        self.eval()
+        for param in self.parameters():
+            param.requires_grad_(False)
+
+    def forward(self, images):
+        return self.clip_model.encode_image(images)
+
+
 class MaPLeZeroPromptImageEncoder(torch.nn.Module):
     def __init__(self, visual, n_ctx, prompt_depth):
         super().__init__()
@@ -97,6 +109,15 @@ def get_compatible_zeroshot_classifier(args, device=None):
     device = device or args.device
     text_clip_model, _ = clip.load(args.model, device=device)
     return _build_zeroshot_classifier(args, text_clip_model, device)
+
+
+def build_frozen_zeroshot_anchor(args, device=None):
+    device = device or args.device
+    clean_clip_model, _ = clip.load(args.model, device=device)
+    clean_clip_model.eval()
+    classification_head = _build_zeroshot_classifier(args, clean_clip_model, device).to(device)
+    anchor_model = FrozenZeroShotAnchor(FrozenCLIPImageEncoder(clean_clip_model), classification_head).to(device)
+    return anchor_model
 
 
 def eval(args):

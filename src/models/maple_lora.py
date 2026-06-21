@@ -14,15 +14,20 @@ class LoRAWeightParametrization(torch.nn.Module):
         self.rank = rank
         self.alpha = alpha if alpha is not None else rank * 2
         self.scaling = self.alpha / self.rank
+        self.register_buffer("gamma", torch.tensor(1.0, dtype=torch.float32))
         self.lora_down = torch.nn.Linear(in_features, rank, bias=False)
         self.lora_up = torch.nn.Linear(rank, out_features, bias=False)
         torch.nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
         torch.nn.init.zeros_(self.lora_up.weight)
 
+    def set_gamma(self, gamma):
+        self.gamma.fill_(float(gamma))
+
     def forward(self, original_weight):
         delta = self.lora_up.weight @ self.lora_down.weight
         delta = delta.to(device=original_weight.device, dtype=original_weight.dtype)
-        return original_weight + delta * self.scaling
+        gamma = self.gamma.to(device=original_weight.device, dtype=original_weight.dtype)
+        return original_weight + gamma * delta * self.scaling
 
 
 def has_lora_weight_parametrization(linear_layer):
@@ -96,3 +101,14 @@ def load_lora_state_dict(model, lora_state_dict):
     with torch.no_grad():
         for name, tensor in lora_state_dict.items():
             current_params[name].copy_(tensor.to(device=current_params[name].device, dtype=current_params[name].dtype))
+
+
+def set_lora_gamma(model, gamma):
+    model = model.module if hasattr(model, "module") else model
+    for module in model.modules():
+        parametrizations = getattr(module, "parametrizations", None)
+        if parametrizations is None or not hasattr(parametrizations, "weight"):
+            continue
+        for parametrization in parametrizations.weight:
+            if hasattr(parametrization, "set_gamma"):
+                parametrization.set_gamma(gamma)

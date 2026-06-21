@@ -10,7 +10,7 @@ from tqdm import tqdm
 from src.datasets.dataloader import maybe_dictionarize
 from src.device import optimizer_step
 from src.models import maple_clip
-from src.models.maple_lora import collect_lora_state_dict, inject_vision_out_proj_lora, load_lora_state_dict
+from src.models.maple_lora import collect_lora_state_dict, inject_vision_out_proj_lora, load_lora_state_dict, set_lora_gamma
 
 
 SUPPORTED_FULL_MAPLE_MODELS = {"ViT-B/32", "ViT-B/16"}
@@ -169,6 +169,7 @@ class CustomFullMaPLeCLIP(torch.nn.Module):
             dropout=getattr(args, "maple_lora_dropout", 0.0),
             layers=getattr(args, "maple_lora_layers", "last6"),
         )
+        set_lora_gamma(self, getattr(args, "maple_lora_gamma", 1.0))
 
     def forward(self, image):
         prompts, shared_ctx, deep_text_prompts, deep_vision_prompts = self.prompt_learner()
@@ -359,6 +360,6 @@ def train_full_maple_one_epoch(
     return TrainStats(epoch=epoch, loss=total_loss / total_seen, accuracy=total_correct / total_seen)
 
 
-def eval_full_maple_single_dataset(model, dataset, args, tau=None, class_priors=None):
+def eval_full_maple_single_dataset(model, dataset, args, tau=None, class_priors=None, class_bias=None):
     from src.models.coop import eval_coop_single_dataset
-    return eval_coop_single_dataset(model, dataset, args, desc="MaPLe eval", tau=tau, class_priors=class_priors)
+    return eval_coop_single_dataset(model, dataset, args, desc="MaPLe eval", tau=tau, class_priors=class_priors, class_bias=class_bias)

@@ -23,14 +23,14 @@ from src.models.maple_full import (
 )
 from src.models.logit_adjustment import (
     build_train_class_priors_for_dataset,
+    describe_class_bias_selection,
     describe_tau_selection,
     parse_tau_grid,
+    select_best_class_bias,
     select_best_tau,
 )
 from src.models.zeroshot import (
-    FrozenZeroShotAnchor,
-    MaPLeZeroPromptImageEncoder,
-    get_compatible_zeroshot_classifier,
+    build_frozen_zeroshot_anchor,
 )
 from src.train_coop import build_eval_dataset, get_validation_score, log_wandb_summary
 
@@ -121,6 +121,20 @@ def build_step_lr_scheduler(optimizer, args, total_steps):
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
+def parse_class_bias_scale_grid(raw_value):
+    if raw_value is None:
+        return []
+    if isinstance(raw_value, (list, tuple)):
+        return [float(value) for value in raw_value]
+    return [float(value.strip()) for value in str(raw_value).split(",") if value.strip()]
+
+
+def build_class_bias_candidates(class_priors, scale_grid, eps=1e-12):
+    centered_log_priors = torch.log(class_priors.clamp_min(eps))
+    centered_log_priors = centered_log_priors - centered_log_priors.mean()
+    return [(-scale * centered_log_priors).detach().cpu() for scale in scale_grid]
+
+
 def main(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -157,13 +171,7 @@ def main(args):
     kl_weight = getattr(args, "kl_weight", 0.0)
     kl_temperature = getattr(args, "kl_temperature", 1.0)
     if kl_weight != 0.0:
-        classification_head = get_compatible_zeroshot_classifier(args, device=args.device).to(args.device)
-        anchor_image_encoder = MaPLeZeroPromptImageEncoder(
-            clip_model.visual,
-            n_ctx=args.n_ctx,
-            prompt_depth=args.maple_prompt_depth,
-        ).to(args.device)
-        anchor_model = FrozenZeroShotAnchor(anchor_image_encoder, classification_head).to(args.device)
+        anchor_model = build_frozen_zeroshot_anchor(args, device=args.device)
 
     trainable_parameters = [param for param in model.parameters() if param.requires_grad]
     optimizer = torch.optim.AdamW(trainable_parameters, lr=args.lr, weight_decay=args.wd)
@@ -252,6 +260,7 @@ def main(args):
 
     _, class_priors = build_train_class_priors_for_dataset(train_data, args.device)
     selected_tau = args.logit_adjustment_tau
+    selected_class_bias = None
     tau_grid = parse_tau_grid(args.logit_adjustment_tau_grid)
     if tau_grid is not None:
         eval_encoder = SimpleNamespaceEncoder(clip_model, preprocess)
@@ -268,13 +277,38 @@ def main(args):
             print(line)
         selected_tau = selection.best_tau
 
+    if getattr(args, "class_bias_calibration", False):
+        eval_encoder = SimpleNamespaceEncoder(clip_model, preprocess)
+        selection_dataset = build_eval_dataset(args.selection_split, eval_encoder, args, allow_ood_hp_subsample=True)
+        bias_candidates = build_class_bias_candidates(
+            class_priors,
+            parse_class_bias_scale_grid(getattr(args, "class_bias_scale_grid", None)),
+        )
+        bias_selection = select_best_class_bias(
+            model,
+            selection_dataset,
+            args,
+            bias_candidates,
+            metric_name=args.best_metric,
+        )
+        for line in describe_class_bias_selection(bias_selection):
+            print(line)
+        selected_class_bias = bias_selection.best_bias
+
     summary_rows = []
     if args.eval_datasets is not None:
         eval_encoder = SimpleNamespaceEncoder(clip_model, preprocess)
         for dataset_name in args.eval_datasets:
             print(f"Evaluating full MaPLe on {dataset_name}...")
             eval_dataset = build_eval_dataset(dataset_name, eval_encoder, args)
-            results = eval_full_maple_single_dataset(model, eval_dataset, args, tau=selected_tau, class_priors=class_priors)
+            results = eval_full_maple_single_dataset(
+                model,
+                eval_dataset,
+                args,
+                tau=selected_tau,
+                class_priors=class_priors,
+                class_bias=selected_class_bias,
+            )
             top1 = results.get("top1")
             f1_macro = results.get("F1-macro_all")
             print(f"  {dataset_name} Top-1 accuracy: {top1:.4f}")
