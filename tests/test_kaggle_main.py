@@ -188,7 +188,10 @@ class KaggleMainTest(unittest.TestCase):
             config_path.write_text(
                 'parser.add_argument("--lr-scheduler")\n'
                 'parser.add_argument("--warmup-length")\n'
-                'parser.add_argument("--maple-precision", choices=["fp32", "amp"])\n',
+                'parser.add_argument("--maple-precision", choices=["fp32", "amp"])\n'
+                'parser.add_argument("--maple-lora-gamma")\n'
+                'parser.add_argument("--class-bias-calibration")\n'
+                'parser.add_argument("--class-bias-scale-grid")\n',
                 encoding="utf-8",
             )
 
@@ -380,11 +383,14 @@ class KaggleMainTest(unittest.TestCase):
         self.assertIn("--maple-lora-rank=4", argv)
         self.assertIn("--maple-lora-alpha=8", argv)
         self.assertIn("--maple-lora-layers=last6", argv)
+        self.assertIn("--maple-lora-gamma=1.0", argv)
         self.assertNotIn("--class-balanced-ce", argv)
         self.assertIn("--epochs=20", argv)
         self.assertIn("--maple-precision=amp", argv)
         self.assertIn("--lr-scheduler=cosine", argv)
         self.assertIn("--warmup-length=500", argv)
+        self.assertIn("--class-bias-calibration", argv)
+        self.assertIn("--class-bias-scale-grid=-2,-1,-0.5,0,0.5,1,2", argv)
         self.assertNotIn("--kl-weight=0.1", argv)
         self.assertNotIn("--kl-temperature=1.0", argv)
         self.assertIn("--val-dataset=IWildCamVal", argv)
@@ -399,16 +405,22 @@ class KaggleMainTest(unittest.TestCase):
         argv = build_c1_training_argv("./data", [
             "--batch-size=64",
             "--epochs=1",
+            "--maple-lora-gamma=0.5",
+            "--class-bias-scale-grid=0,1",
             "--no-wandb",
             "--save=/tmp/c1.pt",
         ])
 
         self.assertIn("--batch-size=64", argv)
         self.assertIn("--epochs=1", argv)
+        self.assertIn("--maple-lora-gamma=0.5", argv)
+        self.assertIn("--class-bias-scale-grid=0,1", argv)
         self.assertIn("--no-wandb", argv)
         self.assertIn("--save=/tmp/c1.pt", argv)
         self.assertNotIn("--batch-size=256", argv)
         self.assertNotIn("--epochs=20", argv)
+        self.assertNotIn("--maple-lora-gamma=1.0", argv)
+        self.assertNotIn("--class-bias-scale-grid=-2,-1,-0.5,0,0.5,1,2", argv)
         self.assertNotIn("--kl-weight=0.1", argv)
         self.assertNotIn("--wandb", argv)
         self.assertNotIn("--save=/kaggle/working/checkpoints/c1_maple_lora_kl_vitb16_bs256.pt", argv)
@@ -423,6 +435,8 @@ class KaggleMainTest(unittest.TestCase):
         self.assertIn("--val-dataset=IWildCamOODVal", argv)
         self.assertIn("--num-ood-hp-examples=1000", argv)
         self.assertIn("--class-balanced-ood", argv)
+        self.assertIn("--class-bias-calibration", argv)
+        self.assertIn("--class-bias-scale-grid=-2,-1,-0.5,0,0.5,1,2", argv)
         self.assertIn("--wandb-run-name=c1-autoft-1k-oodval-vit-b16-bs256", argv)
         self.assertIn("--save=/kaggle/working/checkpoints/c1_autoft_1k_oodval_vitb16_bs256.pt", argv)
 

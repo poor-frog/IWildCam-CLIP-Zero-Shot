@@ -81,6 +81,7 @@ MAPLE_LORA_DEFAULTS = {
     "--maple-lora-rank": "4",
     "--maple-lora-alpha": "8",
     "--maple-lora-layers": "last6",
+    "--maple-lora-gamma": "1.0",
     "--wandb-run-name": "maple-lora-vit-b16-bs256-r4-last6-e20-lr1e-5",
     "--save": "./checkpoints/maple_lora_vitb16_bs256_r4_last6_e20_lr1e-5.pt",
 }
@@ -91,10 +92,11 @@ C1_DEFAULTS = {
     "--eval-datasets": "IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
     "--val-dataset": "IWildCamVal",
     "--best-metric": "F1-macro_all",
+    "--class-bias-scale-grid": "-2,-1,-0.5,0,0.5,1,2",
     "--wandb-run-name": "c1-maple-lora-kl-vit-b16-bs256",
     "--save": "/kaggle/working/checkpoints/c1_maple_lora_kl_vitb16_bs256.pt",
 }
-C1_DEFAULT_FLAGS = ["--wandb"]
+C1_DEFAULT_FLAGS = ["--wandb", "--class-bias-calibration"]
 
 C1_AUTOFT_DEFAULTS = {
     **C1_DEFAULTS,
@@ -103,7 +105,7 @@ C1_AUTOFT_DEFAULTS = {
     "--wandb-run-name": "c1-autoft-1k-oodval-vit-b16-bs256",
     "--save": "/kaggle/working/checkpoints/c1_autoft_1k_oodval_vitb16_bs256.pt",
 }
-C1_AUTOFT_DEFAULT_FLAGS = ["--wandb", "--class-balanced-ood"]
+C1_AUTOFT_DEFAULT_FLAGS = ["--wandb", "--class-balanced-ood", "--class-bias-calibration"]
 C1_KL_WEIGHT = 0.1
 C1_KL_TEMPERATURE = 1.0
 
@@ -413,6 +415,9 @@ def assert_cloned_repo_supports_runtime_flags(repo_root):
     required_fragments = (
         "--lr-scheduler",
         "--warmup-length",
+        "--maple-lora-gamma",
+        "--class-bias-calibration",
+        "--class-bias-scale-grid",
         '"amp"',
     )
     missing = [fragment for fragment in required_fragments if fragment not in config_text]
@@ -420,7 +425,8 @@ def assert_cloned_repo_supports_runtime_flags(repo_root):
         raise RuntimeError(
             "The cloned repo is stale and does not support the current Kaggle MaPLe/C1 flags "
             f"{missing}. Push the latest PoorFrogs code or set DEFAULT_GITHUB_REPO to a branch/commit "
-            "that includes --maple-precision=amp, --lr-scheduler, and --warmup-length before rerunning."
+            "that includes --maple-precision=amp, --lr-scheduler, --warmup-length, "
+            "--maple-lora-gamma, and class-bias calibration flags before rerunning."
         )
 
 
