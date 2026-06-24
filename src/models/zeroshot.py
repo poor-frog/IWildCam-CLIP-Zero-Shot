@@ -1,5 +1,3 @@
-import copy
-
 import torch
 from tqdm import tqdm
 
@@ -118,11 +116,7 @@ def build_frozen_zeroshot_anchor(args, device=None):
     clean_clip_model, _ = clip.load(args.model, device=device)
     clean_clip_model.eval()
     classification_head = _build_zeroshot_classifier(args, clean_clip_model, device).to(device)
-    image_encoder = MaPLeZeroPromptImageEncoder(
-        copy.deepcopy(clean_clip_model.visual),
-        args.n_ctx,
-        args.maple_prompt_depth,
-    )
+    image_encoder = FrozenCLIPImageEncoder(clean_clip_model)
     anchor_model = FrozenZeroShotAnchor(image_encoder, classification_head).to(device)
     return anchor_model
 

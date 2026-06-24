@@ -522,7 +522,7 @@ class FullMaPLeModuleTest(unittest.TestCase):
         build_anchor.assert_called_once_with(args, device=args.device)
         self.assertIs(train_calls[0]["anchor_model"], clean_anchor)
 
-    def test_frozen_zeroshot_anchor_uses_independent_zero_prompt_maple_visual(self):
+    def test_frozen_zeroshot_anchor_uses_vanilla_clip_image_encoder(self):
         import src.models.zeroshot as zeroshot
 
         class TinyVisual(torch.nn.Module):
@@ -530,14 +530,19 @@ class FullMaPLeModuleTest(unittest.TestCase):
                 super().__init__()
                 self.conv1 = torch.nn.Conv2d(3, 4, kernel_size=1, bias=False)
 
-            def forward(self, images, shared_ctx, prompts):
-                return torch.zeros(images.shape[0], 4)
+            def forward(self, images):
+                return torch.ones(images.shape[0], 4)
 
         class TinyClip(torch.nn.Module):
+            dtype = torch.float32
+
             def __init__(self):
                 super().__init__()
                 self.visual = TinyVisual()
                 self.logit_scale = torch.nn.Parameter(torch.ones([]))
+
+            def encode_image(self, images):
+                return self.visual(images)
 
             def eval(self):
                 return self
@@ -557,8 +562,11 @@ class FullMaPLeModuleTest(unittest.TestCase):
              patch.object(zeroshot, "_build_zeroshot_classifier", return_value=classification_head):
             anchor = zeroshot.build_frozen_zeroshot_anchor(args, device=args.device)
 
-        self.assertIsInstance(anchor.image_encoder, zeroshot.MaPLeZeroPromptImageEncoder)
-        self.assertIsNot(anchor.image_encoder.visual, clip_model.visual)
+        logits = anchor(torch.zeros(2, 3, 1, 1))
+
+        self.assertIsInstance(anchor.image_encoder, zeroshot.FrozenCLIPImageEncoder)
+        self.assertIs(anchor.image_encoder.clip_model, clip_model)
+        self.assertEqual(logits.shape, torch.Size([2, 2]))
         self.assertFalse(any(parameter.requires_grad for parameter in anchor.parameters()))
 
     def test_build_step_lr_scheduler_warms_up_then_cosine_decays_per_step(self):
