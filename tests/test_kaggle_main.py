@@ -395,8 +395,8 @@ class KaggleMainTest(unittest.TestCase):
         self.assertNotIn("--kl-temperature=1.0", argv)
         self.assertIn("--val-dataset=IWildCamVal", argv)
         self.assertIn("--best-metric=F1-macro_all", argv)
-        self.assertIn("--wandb-run-name=c1-maple-lora-kl-vit-b16-bs256", argv)
-        self.assertIn("--save=/kaggle/working/checkpoints/c1_maple_lora_kl_vitb16_bs256.pt", argv)
+        self.assertIn("--wandb-run-name=c1-fixed-anchor-kl0p1-iwildcamval", argv)
+        self.assertIn("--save=/kaggle/working/checkpoints/c1_fixed_anchor_kl0p1_iwildcamval.pt", argv)
         self.assertIn("--wandb", argv)
 
     def test_build_c1_training_argv_preserves_overrides(self):

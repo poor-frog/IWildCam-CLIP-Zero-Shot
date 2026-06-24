@@ -93,8 +93,8 @@ C1_DEFAULTS = {
     "--val-dataset": "IWildCamVal",
     "--best-metric": "F1-macro_all",
     "--class-bias-scale-grid": "-2,-1,-0.5,0,0.5,1,2",
-    "--wandb-run-name": "c1-maple-lora-kl-vit-b16-bs256",
-    "--save": "/kaggle/working/checkpoints/c1_maple_lora_kl_vitb16_bs256.pt",
+    "--wandb-run-name": "c1-fixed-anchor-kl0p1-iwildcamval",
+    "--save": "/kaggle/working/checkpoints/c1_fixed_anchor_kl0p1_iwildcamval.pt",
 }
 C1_DEFAULT_FLAGS = ["--wandb", "--class-bias-calibration"]
 
