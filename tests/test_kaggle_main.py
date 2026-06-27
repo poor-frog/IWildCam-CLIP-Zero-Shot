@@ -472,6 +472,7 @@ class KaggleMainTest(unittest.TestCase):
         self.assertIn("--epochs=20", argv)
         self.assertIn("--lr=1e-5", argv)
         self.assertIn("--wd=0.2", argv)
+        self.assertIn("--maple-precision=amp", argv)
         self.assertIn("--template=iwildcam_template", argv)
         self.assertIn("--val-dataset=IWildCamVal", argv)
         self.assertIn("--best-metric=F1-macro_all", argv)

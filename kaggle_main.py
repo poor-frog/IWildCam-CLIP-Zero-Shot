@@ -119,6 +119,7 @@ FLYP_DEFAULTS = {
     "--lr": "1e-5",
     "--wd": "0.2",
     "--lr-scheduler": "cosine",
+    "--maple-precision": "amp",
     "--template": "iwildcam_template",
     "--val-dataset": "IWildCamVal",
     "--best-metric": "F1-macro_all",
