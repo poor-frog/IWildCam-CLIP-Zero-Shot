@@ -71,6 +71,10 @@ def load_wise_interpolated_state(model, finetuned_state_dict, zeroshot_state_dic
     model.load_state_dict(interpolated)
 
 
+def should_use_flyp_amp(args):
+    return str(args.device).startswith("cuda") and getattr(args, "maple_precision", "fp32") == "amp"
+
+
 def main(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -106,8 +110,7 @@ def main(args):
         effective_batches_per_epoch = min(effective_batches_per_epoch, args.max_train_batches)
     total_steps = max(args.epochs * effective_batches_per_epoch, 1)
     scheduler = build_step_lr_scheduler(optimizer, args, total_steps)
-    requested_precision = getattr(args, "maple_precision", "amp")
-    use_amp = str(args.device).startswith("cuda") and requested_precision in ("amp", "fp32")
+    use_amp = should_use_flyp_amp(args)
     args.use_amp = use_amp
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_amp else None
     args.training_method = "flyp"

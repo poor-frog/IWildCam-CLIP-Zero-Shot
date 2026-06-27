@@ -291,6 +291,15 @@ class FlypWiseParseTest(unittest.TestCase):
         self.assertEqual(result, [0.1, 0.9])
 
 
+class FlypAmpConfigTest(unittest.TestCase):
+    def test_flyp_amp_requires_cuda_and_amp_precision(self):
+        from src.train_flyp import should_use_flyp_amp
+
+        self.assertTrue(should_use_flyp_amp(SimpleNamespace(device="cuda", maple_precision="amp")))
+        self.assertFalse(should_use_flyp_amp(SimpleNamespace(device="cuda", maple_precision="fp32")))
+        self.assertFalse(should_use_flyp_amp(SimpleNamespace(device="cpu", maple_precision="amp")))
+
+
 class FlypUnpackClipForwardTest(unittest.TestCase):
     def test_unpack_dict(self):
         from src.models.flyp import unpack_clip_forward
@@ -395,11 +404,11 @@ class FlypMainAmpTest(unittest.TestCase):
         self.assertTrue(args.use_amp)
         self.assertIsNotNone(captured["scaler"])
 
-    def test_main_defaults_to_amp_on_cuda_for_stale_kaggle_wrapper(self):
+    def test_main_disables_grad_scaler_when_fp32_precision_requested(self):
         args, captured = self._run_main_with_precision("fp32")
 
-        self.assertTrue(args.use_amp)
-        self.assertIsNotNone(captured["scaler"])
+        self.assertFalse(args.use_amp)
+        self.assertIsNone(captured["scaler"])
 
 
 class FlypSavePathTest(unittest.TestCase):
