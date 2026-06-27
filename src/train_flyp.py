@@ -106,6 +106,9 @@ def main(args):
         effective_batches_per_epoch = min(effective_batches_per_epoch, args.max_train_batches)
     total_steps = max(args.epochs * effective_batches_per_epoch, 1)
     scheduler = build_step_lr_scheduler(optimizer, args, total_steps)
+    use_amp = getattr(args, "maple_precision", "fp32") == "amp" and str(args.device).startswith("cuda")
+    args.use_amp = use_amp
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_amp else None
     args.training_method = "flyp"
     wandb = init_wandb(args)
     template_fns = getattr(templates, args.template)
@@ -133,6 +136,7 @@ def main(args):
             init_state_dict=zeroshot_state_dict,
             drm_weight=getattr(args, "drm_weight", 0.0),
             scheduler=scheduler,
+            scaler=scaler,
         )
         print(f"Epoch {epoch}: loss={stats.loss:.4f}")
         if wandb is not None:

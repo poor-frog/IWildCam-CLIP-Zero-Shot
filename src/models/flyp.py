@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from contextlib import nullcontext
 
 import open_clip
 import torch
@@ -111,6 +112,7 @@ def train_flyp_one_epoch(
     init_state_dict=None,
     drm_weight=0.0,
     scheduler=None,
+    scaler=None,
 ):
     model.train()
     tokenizer = open_clip.get_tokenizer(args.model)
@@ -130,25 +132,41 @@ def train_flyp_one_epoch(
         captions = build_flyp_captions(labels, classnames, templates, offset=batch_index)
         text_tokens = tokenizer(captions).to(args.device)
 
-        image_features, text_features, logit_scale = unpack_clip_forward(model(images, text_tokens))
-        clip_loss = compute_flyp_clip_loss(image_features, text_features, logit_scale)
-        if drm_weight != 0.0:
-            if init_state_dict is None:
-                raise ValueError("init_state_dict is required when drm_weight is non-zero.")
-            drm_loss = compute_drm_loss(model, init_state_dict, drm_weight)
-        else:
-            drm_loss = clip_loss.new_zeros(())
-        loss = clip_loss + drm_loss
+        use_autocast = getattr(args, "use_amp", False) and str(args.device).startswith("cuda")
+        autocast_context = torch.amp.autocast("cuda", enabled=True) if use_autocast else nullcontext()
+        with autocast_context:
+            image_features, text_features, logit_scale = unpack_clip_forward(model(images, text_tokens))
+            clip_loss = compute_flyp_clip_loss(image_features, text_features, logit_scale)
+            if drm_weight != 0.0:
+                if init_state_dict is None:
+                    raise ValueError("init_state_dict is required when drm_weight is non-zero.")
+                drm_loss = compute_drm_loss(model, init_state_dict, drm_weight)
+            else:
+                drm_loss = clip_loss.new_zeros(())
+            loss = clip_loss + drm_loss
         if not torch.isfinite(loss):
             raise FloatingPointError(f"FLYP produced non-finite loss at epoch {epoch}, batch {batch_index}")
 
         optimizer.zero_grad()
-        loss.backward()
-        for name, param in model.named_parameters():
-            if param.grad is not None and not torch.isfinite(param.grad).all():
-                raise FloatingPointError(f"FLYP produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
-        optimizer_step(optimizer, args.device)
-        if scheduler is not None:
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+        else:
+            loss.backward()
+        if scaler is None:
+            for name, param in model.named_parameters():
+                if param.grad is not None and not torch.isfinite(param.grad).all():
+                    raise FloatingPointError(f"FLYP produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
+        previous_scale = scaler.get_scale() if scaler is not None and hasattr(scaler, "get_scale") else None
+        if scaler is not None:
+            scaler.step(optimizer)
+            scaler.update()
+            current_scale = scaler.get_scale() if hasattr(scaler, "get_scale") else previous_scale
+            optimizer_was_skipped = previous_scale is not None and current_scale < previous_scale
+        else:
+            optimizer_step(optimizer, args.device)
+            optimizer_was_skipped = False
+        if scheduler is not None and not optimizer_was_skipped:
             scheduler.step()
 
         batch_size = images.shape[0]

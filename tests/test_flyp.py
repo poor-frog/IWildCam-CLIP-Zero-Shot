@@ -67,6 +67,76 @@ class FlypModuleTest(unittest.TestCase):
         self.assertEqual(model.calls, 1)
         self.assertTrue(torch.isfinite(torch.tensor(stats.loss)))
 
+    def test_train_flyp_one_epoch_uses_grad_scaler_when_provided(self):
+        from src.models.flyp import train_flyp_one_epoch
+
+        class TinyTokenizer:
+            def __call__(self, captions):
+                return torch.zeros(len(captions), 4, dtype=torch.long)
+
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.eye(2))
+
+            def forward(self, images, text):
+                features = images @ self.weight
+                return features, features, torch.ones(())
+
+        class FakeScaledLoss:
+            def __init__(self, loss):
+                self.loss = loss
+                self.backward_called = False
+
+            def backward(self):
+                self.backward_called = True
+                self.loss.backward()
+
+        class FakeScaler:
+            def __init__(self):
+                self.scaled_loss = None
+                self.unscale_called = False
+                self.step_called = False
+                self.update_called = False
+
+            def scale(self, loss):
+                self.scaled_loss = FakeScaledLoss(loss)
+                return self.scaled_loss
+
+            def unscale_(self, optimizer):
+                self.unscale_called = True
+
+            def step(self, optimizer):
+                self.step_called = True
+                optimizer.step()
+
+            def update(self):
+                self.update_called = True
+
+        model = TinyModel()
+        batch = {"images": torch.eye(2), "labels": torch.tensor([0, 1])}
+        args = SimpleNamespace(device="cpu", model="ViT-B-16", max_train_batches=1, use_amp=True)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+        scaler = FakeScaler()
+
+        with patch("src.models.flyp.open_clip.get_tokenizer", return_value=TinyTokenizer()):
+            stats = train_flyp_one_epoch(
+                model,
+                [batch],
+                optimizer,
+                args,
+                ["frog", "deer"],
+                [lambda c: f"a photo of {c}."],
+                epoch=1,
+                scaler=scaler,
+            )
+
+        self.assertTrue(scaler.scaled_loss.backward_called)
+        self.assertTrue(scaler.unscale_called)
+        self.assertTrue(scaler.step_called)
+        self.assertTrue(scaler.update_called)
+        self.assertTrue(torch.isfinite(torch.tensor(stats.loss)))
+
 
 class FlypDrmTest(unittest.TestCase):
     def test_drm_loss_is_zero_when_model_unchanged(self):
