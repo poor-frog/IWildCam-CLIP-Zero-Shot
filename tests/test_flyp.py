@@ -174,6 +174,23 @@ class FlypDrmTest(unittest.TestCase):
 
         self.assertIsNotNone(model.weight.grad)
 
+    def test_drm_gradient_matches_backpropagated_loss(self):
+        from src.models.flyp import add_drm_gradient, compute_drm_loss
+
+        expected_model = torch.nn.Linear(2, 2, bias=False)
+        actual_model = torch.nn.Linear(2, 2, bias=False)
+        actual_model.load_state_dict(expected_model.state_dict())
+        init_state = {name: tensor.detach().cpu().clone() for name, tensor in expected_model.state_dict().items()}
+        with torch.no_grad():
+            expected_model.weight.add_(1.0)
+            actual_model.weight.add_(1.0)
+
+        compute_drm_loss(expected_model, init_state, drm_weight=0.5).backward()
+        actual_model.weight.grad = torch.zeros_like(actual_model.weight)
+        add_drm_gradient(actual_model, init_state, drm_weight=0.5)
+
+        self.assertTrue(torch.allclose(actual_model.weight.grad, expected_model.weight.grad))
+
 
 class FlypWiseTest(unittest.TestCase):
     def test_wise_interpolate_alpha_zero_returns_finetuned_state(self):

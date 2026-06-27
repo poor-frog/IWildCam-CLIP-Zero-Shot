@@ -23,6 +23,9 @@ class FlypTrainStats:
     lr: float | None = None
 
 
+DRM_CHUNK_SIZE = 1_000_000
+
+
 def build_flyp_captions(labels, classnames, templates, offset=0):
     captions = []
     template_count = len(templates)
@@ -67,13 +70,47 @@ def compute_drm_loss(model, init_state_dict, drm_weight):
             continue
         if name not in init_state_dict:
             raise KeyError(f"Initial state dict is missing parameter {name!r}.")
-        initial = init_state_dict[name].to(device=param.device, dtype=param.dtype)
-        component = (param - initial).pow(2).sum()
-        total = component if total is None else total + component
+        param_flat = param.flatten()
+        initial_flat = init_state_dict[name].flatten()
+        for start in range(0, param_flat.numel(), DRM_CHUNK_SIZE):
+            end = start + DRM_CHUNK_SIZE
+            param_chunk = param_flat[start:end]
+            initial_chunk = initial_flat[start:end].to(device=param.device, dtype=param.dtype)
+            component = (param_chunk - initial_chunk).pow(2).sum()
+            total = component if total is None else total + component
 
     if total is None:
         return next(model.parameters()).new_zeros(())
     return float(drm_weight) * total
+
+
+def add_drm_gradient(model, init_state_dict, drm_weight):
+    if drm_weight == 0.0:
+        return
+
+    model = unwrap_model(model)
+    scale = 2.0 * float(drm_weight)
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if name not in init_state_dict:
+            raise KeyError(f"Initial state dict is missing parameter {name!r}.")
+        had_grad = param.grad is not None
+        if not had_grad:
+            param.grad = torch.empty_like(param)
+        param_flat = param.flatten()
+        grad_flat = param.grad.flatten()
+        initial_flat = init_state_dict[name].flatten()
+        for start in range(0, param_flat.numel(), DRM_CHUNK_SIZE):
+            end = start + DRM_CHUNK_SIZE
+            param_chunk = param_flat[start:end]
+            grad_chunk = grad_flat[start:end]
+            initial_chunk = initial_flat[start:end].to(device=param.device, dtype=param.dtype)
+            if had_grad:
+                grad_chunk.add_(param_chunk, alpha=scale)
+                grad_chunk.add_(initial_chunk, alpha=-scale)
+            else:
+                torch.sub(param_chunk, initial_chunk, alpha=scale, out=grad_chunk)
 
 
 def wise_interpolate_state_dict(finetuned_state_dict, zeroshot_state_dict, alpha):
@@ -137,13 +174,7 @@ def train_flyp_one_epoch(
         with autocast_context:
             image_features, text_features, logit_scale = unpack_clip_forward(model(images, text_tokens))
             clip_loss = compute_flyp_clip_loss(image_features, text_features, logit_scale)
-            if drm_weight != 0.0:
-                if init_state_dict is None:
-                    raise ValueError("init_state_dict is required when drm_weight is non-zero.")
-                drm_loss = compute_drm_loss(model, init_state_dict, drm_weight)
-            else:
-                drm_loss = clip_loss.new_zeros(())
-            loss = clip_loss + drm_loss
+            loss = clip_loss
         if not torch.isfinite(loss):
             raise FloatingPointError(f"FLYP produced non-finite loss at epoch {epoch}, batch {batch_index}")
 
@@ -153,6 +184,14 @@ def train_flyp_one_epoch(
             scaler.unscale_(optimizer)
         else:
             loss.backward()
+        if drm_weight != 0.0:
+            if init_state_dict is None:
+                raise ValueError("init_state_dict is required when drm_weight is non-zero.")
+            add_drm_gradient(model, init_state_dict, drm_weight)
+            with torch.no_grad():
+                drm_loss = compute_drm_loss(model, init_state_dict, drm_weight)
+        else:
+            drm_loss = clip_loss.new_zeros(())
         if scaler is None:
             for name, param in model.named_parameters():
                 if param.grad is not None and not torch.isfinite(param.grad).all():
@@ -170,7 +209,7 @@ def train_flyp_one_epoch(
             scheduler.step()
 
         batch_size = images.shape[0]
-        total_loss += loss.item() * batch_size
+        total_loss += (clip_loss.item() + drm_loss.item()) * batch_size
         total_clip_loss += clip_loss.item() * batch_size
         total_drm_loss += drm_loss.item() * batch_size
         total_seen += batch_size
