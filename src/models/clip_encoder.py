@@ -13,8 +13,7 @@ def torch_save(obj, filename):
 
 
 def torch_load(filename, map_location='cpu'):
-    """Load a torch object, handling missing keys gracefully."""
-    state = torch.load(filename, map_location=map_location)
+    state = torch.load(filename, map_location=map_location, weights_only=False)
     return state
 
 
