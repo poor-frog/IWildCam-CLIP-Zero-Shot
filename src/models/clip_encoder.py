@@ -1,4 +1,7 @@
+import os
 import pickle
+from pathlib import Path
+
 import torch
 
 import clip.clip as clip
@@ -8,6 +11,9 @@ import open_clip
 
 def torch_save(obj, filename):
     """Save a torch object with pickle protocol 2 for backwards compatibility."""
+    path = Path(filename)
+    if path.parent != Path("."):
+        os.makedirs(str(path.parent), exist_ok=True)
     with open(filename, 'wb') as f:
         torch.save(obj, f, pickle_protocol=pickle.DEFAULT_PROTOCOL)
 
