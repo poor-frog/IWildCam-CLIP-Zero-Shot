@@ -191,7 +191,10 @@ class KaggleMainTest(unittest.TestCase):
                 'parser.add_argument("--maple-precision", choices=["fp32", "amp"])\n'
                 'parser.add_argument("--maple-lora-gamma")\n'
                 'parser.add_argument("--class-bias-calibration")\n'
-                'parser.add_argument("--class-bias-scale-grid")\n',
+                'parser.add_argument("--class-bias-scale-grid")\n'
+                'parser.add_argument("--drm-weight")\n'
+                'parser.add_argument("--wise-alphas")\n'
+                'parser.add_argument("--wise-eval-alpha")\n',
                 encoding="utf-8",
             )
 
@@ -455,6 +458,65 @@ class KaggleMainTest(unittest.TestCase):
         self.assertNotIn("--val-dataset=IWildCamOODVal", argv)
         self.assertNotIn("--num-ood-hp-examples=1000", argv)
         self.assertNotIn("--class-balanced-ood", argv)
+
+    def test_build_flyp_training_argv_uses_drm_wise_defaults(self):
+        from kaggle_main import build_flyp_training_argv
+
+        argv = build_flyp_training_argv("./data")
+
+        self.assertIn("--model=ViT-B-16", argv)
+        self.assertIn("--train-dataset=IWildCam", argv)
+        self.assertIn("--eval-datasets=IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD", argv)
+        self.assertIn("--data-location=./data", argv)
+        self.assertIn("--batch-size=256", argv)
+        self.assertIn("--epochs=20", argv)
+        self.assertIn("--lr=1e-5", argv)
+        self.assertIn("--wd=0.2", argv)
+        self.assertIn("--template=iwildcam_template", argv)
+        self.assertIn("--val-dataset=IWildCamVal", argv)
+        self.assertIn("--best-metric=F1-macro_all", argv)
+        self.assertIn("--drm-weight=1.0", argv)
+        self.assertIn("--wise-alphas=0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0", argv)
+        self.assertIn("--wandb-run-name=flyp-drm-wise-vit-b16-iwildcamval", argv)
+        self.assertIn("--save=/kaggle/working/checkpoints/flyp_drm_wise_vitb16_iwildcamval.pt", argv)
+        self.assertIn("--wandb", argv)
+
+    def test_build_flyp_training_argv_preserves_overrides(self):
+        from kaggle_main import build_flyp_training_argv
+
+        argv = build_flyp_training_argv("./data", [
+            "--model=ViT-L-14",
+            "--batch-size=16",
+            "--drm-weight=0.01",
+            "--wise-alphas=0,0.5,1",
+            "--no-wandb",
+            "--save=/tmp/flyp.pt",
+        ])
+
+        self.assertIn("--model=ViT-L-14", argv)
+        self.assertIn("--batch-size=16", argv)
+        self.assertIn("--drm-weight=0.01", argv)
+        self.assertIn("--wise-alphas=0,0.5,1", argv)
+        self.assertIn("--no-wandb", argv)
+        self.assertIn("--save=/tmp/flyp.pt", argv)
+        self.assertNotIn("--model=ViT-B-16", argv)
+        self.assertNotIn("--batch-size=256", argv)
+        self.assertNotIn("--drm-weight=1.0", argv)
+        self.assertNotIn("--wandb", argv)
+        self.assertNotIn("--save=/kaggle/working/checkpoints/flyp_drm_wise_vitb16_iwildcamval.pt", argv)
+
+    def test_parse_args_accepts_no_wandb_and_disables_wandb(self):
+        from src.config import parse_arguments
+
+        original_argv = sys.argv
+        try:
+            sys.argv = ["train_flyp.py", "--wandb", "--no-wandb"]
+
+            args = parse_arguments()
+        finally:
+            sys.argv = original_argv
+
+        self.assertFalse(args.wandb)
 
     def test_train_maple_full_imports_without_removed_shallow_module(self):
         import src.train_maple_full as train_maple_full

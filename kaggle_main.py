@@ -109,6 +109,27 @@ C1_AUTOFT_DEFAULT_FLAGS = ["--wandb", "--class-balanced-ood", "--class-bias-cali
 C1_KL_WEIGHT = 0.1
 C1_KL_TEMPERATURE = 1.0
 
+FLYP_DEFAULTS = {
+    "--model": "ViT-B-16",
+    "--train-dataset": "IWildCam",
+    "--eval-datasets": "IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
+    "--batch-size": "256",
+    "--workers": "4",
+    "--epochs": "20",
+    "--lr": "1e-5",
+    "--wd": "0.2",
+    "--lr-scheduler": "cosine",
+    "--template": "iwildcam_template",
+    "--val-dataset": "IWildCamVal",
+    "--best-metric": "F1-macro_all",
+    "--drm-weight": "1.0",
+    "--wise-alphas": "0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0",
+    "--wandb-project": "PoorFrogs",
+    "--wandb-run-name": "flyp-drm-wise-vit-b16-iwildcamval",
+    "--save": "/kaggle/working/checkpoints/flyp_drm_wise_vitb16_iwildcamval.pt",
+}
+FLYP_DEFAULT_FLAGS = ["--wandb"]
+
 
 def strip_mode_args(argv):
     stripped = []
@@ -386,6 +407,24 @@ def build_c1_training_argv(data_location, user_args=None):
     return argv
 
 
+def build_flyp_training_argv(data_location, user_args=None):
+    user_args = user_args or []
+    argv = ["kaggle_main.py"]
+    provided = _provided_option_names([argv[0], *user_args])
+
+    defaults = {**FLYP_DEFAULTS, "--data-location": data_location}
+    for name, value in defaults.items():
+        if name not in provided:
+            argv.append(f"{name}={value}")
+
+    for flag in FLYP_DEFAULT_FLAGS:
+        if flag not in provided and f"--no-{flag[2:]}" not in provided:
+            argv.append(flag)
+
+    argv.extend(user_args)
+    return argv
+
+
 def _ensure_deps():
     packages = [
         "braceexpand",
@@ -418,6 +457,9 @@ def assert_cloned_repo_supports_runtime_flags(repo_root):
         "--maple-lora-gamma",
         "--class-bias-calibration",
         "--class-bias-scale-grid",
+        "--drm-weight",
+        "--wise-alphas",
+        "--wise-eval-alpha",
         '"amp"',
     )
     missing = [fragment for fragment in required_fragments if fragment not in config_text]
@@ -426,7 +468,7 @@ def assert_cloned_repo_supports_runtime_flags(repo_root):
             "The cloned repo is stale and does not support the current Kaggle MaPLe/C1 flags "
             f"{missing}. Push the latest PoorFrogs code or set DEFAULT_GITHUB_REPO to a branch/commit "
             "that includes --maple-precision=amp, --lr-scheduler, --warmup-length, "
-            "--maple-lora-gamma, and class-bias calibration flags before rerunning."
+            "--maple-lora-gamma, class-bias calibration, and FLYP DRM/WiSE flags before rerunning."
         )
 
 
@@ -473,9 +515,9 @@ def main():
     configure_import_path(repo_root)
 
     mode = parse_mode(sys.argv)
-    if mode not in ("coop", "full_maple", "maple_cbce", "maple_tau_sweep", "maple_lora", "c1", "c1_autoft"):
+    if mode not in ("coop", "full_maple", "maple_cbce", "maple_tau_sweep", "maple_lora", "c1", "c1_autoft", "flyp"):
         raise ValueError(
-            f"Unknown mode: {mode}. Use --mode=coop, --mode=full_maple, --mode=maple_cbce, --mode=maple_tau_sweep, --mode=maple_lora, --mode=c1, or --mode=c1_autoft."
+            f"Unknown mode: {mode}. Use --mode=coop, --mode=full_maple, --mode=maple_cbce, --mode=maple_tau_sweep, --mode=maple_lora, --mode=c1, --mode=c1_autoft, or --mode=flyp."
         )
 
     _ensure_deps()
@@ -540,6 +582,13 @@ def main():
         args.kl_weight = float(os.environ.get("C1_KL_WEIGHT", C1_KL_WEIGHT))
         args.kl_temperature = float(os.environ.get("C1_KL_TEMPERATURE", C1_KL_TEMPERATURE))
         run_maple_full(args)
+    elif mode == "flyp":
+        sys.argv = build_flyp_training_argv(data_location, user_args)
+        print("Running Kaggle FLYP + DRM + WiSE training with arguments:")
+        print(" ".join(sys.argv[1:]))
+        from src.config import parse_arguments
+        from src.train_flyp import main as run_flyp
+        run_flyp(parse_arguments())
     else:
         sys.argv = build_coop_training_argv(data_location, user_args)
         print("Running Kaggle CoOp training with arguments:")
