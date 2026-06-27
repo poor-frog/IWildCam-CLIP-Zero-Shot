@@ -106,11 +106,14 @@ def add_drm_gradient(model, init_state_dict, drm_weight):
             param_chunk = param_flat[start:end]
             grad_chunk = grad_flat[start:end]
             initial_chunk = initial_flat[start:end].to(device=param.device, dtype=param.dtype)
-            if had_grad:
-                grad_chunk.add_(param_chunk, alpha=scale)
-                grad_chunk.add_(initial_chunk, alpha=-scale)
-            else:
-                torch.sub(param_chunk, initial_chunk, alpha=scale, out=grad_chunk)
+            with torch.no_grad():
+                if had_grad:
+                    grad_chunk.add_(param_chunk, alpha=scale)
+                    grad_chunk.add_(initial_chunk, alpha=-scale)
+                else:
+                    grad_chunk.copy_(param_chunk)
+                    grad_chunk.sub_(initial_chunk)
+                    grad_chunk.mul_(scale)
 
 
 def wise_interpolate_state_dict(finetuned_state_dict, zeroshot_state_dict, alpha):

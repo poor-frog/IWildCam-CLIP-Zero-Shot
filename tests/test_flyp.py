@@ -191,6 +191,19 @@ class FlypDrmTest(unittest.TestCase):
 
         self.assertTrue(torch.allclose(actual_model.weight.grad, expected_model.weight.grad))
 
+    def test_drm_gradient_initializes_missing_grad(self):
+        from src.models.flyp import add_drm_gradient
+
+        model = torch.nn.Linear(2, 2, bias=False)
+        with torch.no_grad():
+            model.weight.copy_(torch.tensor([[2.0, 3.0], [4.0, 5.0]]))
+        init_state = {"weight": torch.ones_like(model.weight)}
+
+        add_drm_gradient(model, init_state, drm_weight=0.5)
+
+        expected = model.weight.detach() - init_state["weight"]
+        self.assertTrue(torch.allclose(model.weight.grad, expected))
+
 
 class FlypWiseTest(unittest.TestCase):
     def test_wise_interpolate_alpha_zero_returns_finetuned_state(self):
@@ -305,6 +318,88 @@ class FlypCloneStateDictTest(unittest.TestCase):
         with torch.no_grad():
             model.weight.add_(100.0)
         self.assertFalse(torch.equal(sd["weight"], model.weight))
+
+
+class FlypMainAmpTest(unittest.TestCase):
+    def _run_main_with_precision(self, maple_precision):
+        import src.train_flyp as train_flyp
+
+        class TinyClipEncoder(torch.nn.Module):
+            def __init__(self, args, keep_lang=False):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.eye(2))
+                self.train_preprocess = object()
+
+            def to(self, *args, **kwargs):
+                return self
+
+            def save(self, path):
+                pass
+
+        class TinyTrainDataset:
+            classnames = ["frog", "deer"]
+            train_loader = [{"images": torch.eye(2), "labels": torch.tensor([0, 1])}]
+
+            def __init__(self, preprocess, location, batch_size, num_workers):
+                pass
+
+        captured = {}
+
+        def fake_train_flyp_one_epoch(*args, **kwargs):
+            captured["scaler"] = kwargs.get("scaler")
+            return SimpleNamespace(epoch=1, loss=0.0, lr=0.0)
+
+        args = SimpleNamespace(
+            seed=0,
+            template="iwildcam_template",
+            model="ViT-B-16",
+            device="cuda",
+            train_dataset="TinyTrainDataset",
+            data_location="./data",
+            batch_size=2,
+            workers=0,
+            load=None,
+            lr=1e-5,
+            wd=0.2,
+            max_train_batches=None,
+            epochs=1,
+            save=None,
+            best_checkpoint=None,
+            lr_scheduler="cosine",
+            warmup_length=0,
+            maple_precision=maple_precision,
+            wandb=False,
+            val_dataset=None,
+            wise_alphas=None,
+            wise_eval_alpha=None,
+            no_load_best_for_eval=False,
+            eval_datasets=None,
+            drm_weight=1.0,
+        )
+
+        with patch.object(train_flyp, "CLIPEncoder", TinyClipEncoder), \
+                patch.object(train_flyp.datasets, "TinyTrainDataset", TinyTrainDataset, create=True), \
+                patch.object(train_flyp, "maybe_data_parallel", side_effect=lambda model, args: model), \
+                patch.object(train_flyp, "build_step_lr_scheduler", return_value=None), \
+                patch.object(train_flyp, "init_wandb", return_value=None), \
+                patch.object(train_flyp, "train_flyp_one_epoch", side_effect=fake_train_flyp_one_epoch), \
+                patch.object(train_flyp, "parse_wise_alphas", return_value=[]), \
+                patch("src.train_flyp.torch.cuda.is_available", return_value=True):
+            train_flyp.main(args)
+
+        return args, captured
+
+    def test_main_passes_grad_scaler_when_amp_precision_requested(self):
+        args, captured = self._run_main_with_precision("amp")
+
+        self.assertTrue(args.use_amp)
+        self.assertIsNotNone(captured["scaler"])
+
+    def test_main_defaults_to_amp_on_cuda_for_stale_kaggle_wrapper(self):
+        args, captured = self._run_main_with_precision("fp32")
+
+        self.assertTrue(args.use_amp)
+        self.assertIsNotNone(captured["scaler"])
 
 
 class FlypSavePathTest(unittest.TestCase):

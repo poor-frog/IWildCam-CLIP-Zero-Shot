@@ -106,7 +106,8 @@ def main(args):
         effective_batches_per_epoch = min(effective_batches_per_epoch, args.max_train_batches)
     total_steps = max(args.epochs * effective_batches_per_epoch, 1)
     scheduler = build_step_lr_scheduler(optimizer, args, total_steps)
-    use_amp = getattr(args, "maple_precision", "fp32") == "amp" and str(args.device).startswith("cuda")
+    requested_precision = getattr(args, "maple_precision", "amp")
+    use_amp = str(args.device).startswith("cuda") and requested_precision in ("amp", "fp32")
     args.use_amp = use_amp
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_amp else None
     args.training_method = "flyp"
