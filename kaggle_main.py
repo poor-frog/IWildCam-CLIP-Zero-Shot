@@ -12,6 +12,7 @@ DEFAULT_KAGGLE_DATASET_CANDIDATES = [
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_GITHUB_REPO = "https://github.com/poor-frog/IWildCam-CLIP-Zero-Shot.git"
 DEFAULT_KAGGLE_WORKING_REPO = Path("/kaggle/working/IWildCam-CLIP-Zero-Shot")
+FLYP_WISE_FINE_ALPHAS = "0.0,0.05,0.1,0.15,0.2"
 
 COOP_DEFAULTS = {
     "--model": "ViT-B/32",
@@ -124,7 +125,7 @@ FLYP_DEFAULTS = {
     "--val-dataset": "IWildCamVal",
     "--best-metric": "F1-macro_all",
     "--drm-weight": "1.0",
-    "--wise-alphas": "0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0",
+    "--wise-alphas": FLYP_WISE_FINE_ALPHAS,
     "--wandb-project": "PoorFrogs",
     "--wandb-run-name": "flyp-drm-wise-vit-b16-iwildcamval",
     "--save": "/kaggle/working/checkpoints/flyp_drm_wise_vitb16_iwildcamval.pt",

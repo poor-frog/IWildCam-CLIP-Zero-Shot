@@ -477,7 +477,7 @@ class KaggleMainTest(unittest.TestCase):
         self.assertIn("--val-dataset=IWildCamVal", argv)
         self.assertIn("--best-metric=F1-macro_all", argv)
         self.assertIn("--drm-weight=1.0", argv)
-        self.assertIn("--wise-alphas=0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0", argv)
+        self.assertIn("--wise-alphas=0.0,0.05,0.1,0.15,0.2", argv)
         self.assertIn("--wandb-run-name=flyp-drm-wise-vit-b16-iwildcamval", argv)
         self.assertIn("--save=/kaggle/working/checkpoints/flyp_drm_wise_vitb16_iwildcamval.pt", argv)
         self.assertIn("--wandb", argv)
