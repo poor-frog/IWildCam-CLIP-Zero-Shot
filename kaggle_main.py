@@ -133,6 +133,51 @@ FLYP_DEFAULTS = {
 FLYP_DEFAULT_FLAGS = ["--wandb"]
 FLYP_DRM_WEIGHT = 1.0
 
+# ---------------------------------------------------------------------------
+# Kernel overrides (Kaggle compatibility)
+#
+#   `environment_variables` in kernel-metadata.json is NOT supported by
+#   Kaggle, so these hardcoded defaults let you create per-experiment
+#   variants without requiring env vars or kernel-level secrets.  Set them
+#   before pushing a new kernel, then `git commit` is not needed – the
+#   filesystem copy you push is independent of the git working tree.
+#
+#   Each DRM-sweep variant should patch _KERNEL_DRM_WEIGHT only, and keep
+#   the rest at None (which falls through to env var → CLI arg → built-in
+#   default).
+# ---------------------------------------------------------------------------
+_KERNEL_TRAIN_METHOD = "flyp"          # None = env var → CLI arg → "coop"
+_KERNEL_DRM_WEIGHT = None              # None = env var → args.drm_weight
+_KERNEL_WISE_ALPHAS = None             # None = env var → args.wise_alphas
+_KERNEL_WANDB_DISABLE = False          # True = never call wandb (no API key)
+
+
+def _keep_wandb_flag(default_flags):
+    """Return flags with --wandb stripped when the API key is unavailable."""
+    if _KERNEL_WANDB_DISABLE:
+        return [f for f in default_flags if f != "--wandb"]
+    if os.environ.get("WANDB_API_KEY"):
+        return default_flags
+    # env var missing – check Kaggle secrets
+    try:
+        from kaggle_secrets import UserSecretsClient
+        UserSecretsClient().get_secret("WANDB_API_KEY")
+        return default_flags
+    except Exception:
+        return [f for f in default_flags if f != "--wandb"]
+
+
+def _mode_from_overrides():
+    return _KERNEL_TRAIN_METHOD
+
+
+def _drm_weight_from_overrides():
+    return _KERNEL_DRM_WEIGHT
+
+
+def _wise_alphas_from_overrides():
+    return _KERNEL_WISE_ALPHAS
+
 
 def strip_mode_args(argv):
     stripped = []
@@ -151,6 +196,9 @@ def strip_mode_args(argv):
 
 
 def parse_mode(argv):
+    override = _mode_from_overrides()
+    if override is not None:
+        return override
     env_mode = os.environ.get("TRAIN_METHOD")
     if env_mode is not None:
         return env_mode
@@ -303,7 +351,7 @@ def build_coop_training_argv(data_location, user_args=None):
         if name not in provided:
             argv.append(f"{name}={value}")
 
-    for flag in COOP_DEFAULT_FLAGS:
+    for flag in _keep_wandb_flag(COOP_DEFAULT_FLAGS):
         if flag not in provided and f"--no-{flag[2:]}" not in provided:
             argv.append(flag)
 
@@ -321,7 +369,7 @@ def build_full_maple_training_argv(data_location, user_args=None):
         if name not in provided:
             argv.append(f"{name}={value}")
 
-    for flag in FULL_MAPLE_DEFAULT_FLAGS:
+    for flag in _keep_wandb_flag(FULL_MAPLE_DEFAULT_FLAGS):
         if flag not in provided and f"--no-{flag[2:]}" not in provided:
             argv.append(flag)
 
@@ -339,7 +387,7 @@ def build_maple_cbce_training_argv(data_location, user_args=None):
         if name not in provided:
             argv.append(f"{name}={value}")
 
-    for flag in MAPLE_CBCE_FLAGS:
+    for flag in _keep_wandb_flag(MAPLE_CBCE_FLAGS):
         if flag not in provided and f"--no-{flag[2:]}" not in provided:
             argv.append(flag)
 
@@ -357,7 +405,7 @@ def build_maple_tau_sweep_eval_argv(data_location, user_args=None):
         if name not in provided:
             argv.append(f"{name}={value}")
 
-    for flag in MAPLE_TAU_SWEEP_EVAL_FLAGS:
+    for flag in _keep_wandb_flag(MAPLE_TAU_SWEEP_EVAL_FLAGS):
         if flag not in provided and f"--no-{flag[2:]}" not in provided:
             argv.append(flag)
 
@@ -375,7 +423,7 @@ def build_maple_lora_training_argv(data_location, user_args=None):
         if name not in provided:
             argv.append(f"{name}={value}")
 
-    for flag in MAPLE_LORA_DEFAULT_FLAGS:
+    for flag in _keep_wandb_flag(MAPLE_LORA_DEFAULT_FLAGS):
         if flag not in provided and f"--no-{flag[2:]}" not in provided:
             argv.append(flag)
 
@@ -393,7 +441,7 @@ def build_c1_autoft_training_argv(data_location, user_args=None):
         if name not in provided:
             argv.append(f"{name}={value}")
 
-    for flag in C1_AUTOFT_DEFAULT_FLAGS:
+    for flag in _keep_wandb_flag(C1_AUTOFT_DEFAULT_FLAGS):
         if flag not in provided and f"--no-{flag[2:]}" not in provided:
             argv.append(flag)
 
@@ -411,7 +459,7 @@ def build_c1_training_argv(data_location, user_args=None):
         if name not in provided:
             argv.append(f"{name}={value}")
 
-    for flag in C1_DEFAULT_FLAGS:
+    for flag in _keep_wandb_flag(C1_DEFAULT_FLAGS):
         if flag not in provided and f"--no-{flag[2:]}" not in provided:
             argv.append(flag)
 
@@ -429,7 +477,7 @@ def build_flyp_training_argv(data_location, user_args=None):
         if name not in provided:
             argv.append(f"{name}={value}")
 
-    for flag in FLYP_DEFAULT_FLAGS:
+    for flag in _keep_wandb_flag(FLYP_DEFAULT_FLAGS):
         if flag not in provided and f"--no-{flag[2:]}" not in provided:
             argv.append(flag)
 
@@ -485,6 +533,8 @@ def assert_cloned_repo_supports_runtime_flags(repo_root):
 
 
 def _configure_wandb_from_kaggle_secret():
+    if _KERNEL_WANDB_DISABLE:
+        return False
     if os.environ.get("WANDB_API_KEY"):
         return True
     try:
@@ -601,8 +651,16 @@ def main():
         from src.config import parse_arguments
         from src.train_flyp import main as run_flyp
         args = parse_arguments()
-        args.drm_weight = float(os.environ.get("FLYP_DRM_WEIGHT", args.drm_weight))
-        args.wise_alphas = os.environ.get("FLYP_WISE_ALPHAS", args.wise_alphas)
+        drm_override = _drm_weight_from_overrides()
+        if drm_override is not None:
+            args.drm_weight = float(drm_override)
+        else:
+            args.drm_weight = float(os.environ.get("FLYP_DRM_WEIGHT", args.drm_weight))
+        wise_override = _wise_alphas_from_overrides()
+        if wise_override is not None:
+            args.wise_alphas = wise_override
+        else:
+            args.wise_alphas = os.environ.get("FLYP_WISE_ALPHAS", args.wise_alphas)
         run_flyp(args)
     else:
         sys.argv = build_coop_training_argv(data_location, user_args)
