@@ -192,6 +192,14 @@ def find_repo_root(candidates):
     return None
 
 
+def _update_repo(repo_root, check_call=subprocess.check_call):
+    """Pull latest from GitHub if the clone already exists."""
+    try:
+        check_call(["git", "-C", str(repo_root), "pull", "--ff-only"])
+    except Exception:
+        print("Warning: git pull --ff-only failed, continuing with existing clone.")
+
+
 def ensure_repo_root(candidates=None, clone_target=DEFAULT_KAGGLE_WORKING_REPO, check_call=subprocess.check_call):
     candidates = candidates or [
         DEFAULT_REPO_ROOT,
@@ -201,6 +209,7 @@ def ensure_repo_root(candidates=None, clone_target=DEFAULT_KAGGLE_WORKING_REPO, 
     ]
     repo_root = find_repo_root(candidates)
     if repo_root is not None:
+        _update_repo(repo_root, check_call=check_call)
         return repo_root
 
     clone_target = Path(clone_target)
