@@ -28,3 +28,5 @@
 | `SAVE_PATH` | `train_c1_maple_lora_cbce_kl.sh` | `./checkpoints/c1_maple_lora_kl_vitb16_bs256.pt` |
 | `DRM_WEIGHTS` | `flyp_drm_sweep_commands.sh` | `0.0 0.1 0.5 1.0` |
 | `WISE_ALPHAS` | `flyp_drm_sweep_commands.sh` | `0.0,0.05,0.1,0.15,0.2` |
+| `FLYP_DRM_WEIGHT` | `kaggle_main.py --mode=flyp` | parsed `--drm-weight` value, usually `1.0` |
+| `FLYP_WISE_ALPHAS` | `kaggle_main.py --mode=flyp` | parsed `--wise-alphas` value, now `0.0,0.05,0.1,0.15,0.2` |

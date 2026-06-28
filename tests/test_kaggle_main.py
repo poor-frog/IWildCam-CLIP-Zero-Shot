@@ -287,6 +287,53 @@ class KaggleMainTest(unittest.TestCase):
         self.assertLess(calls.index("guard"), calls.index("patch"))
         self.assertLess(calls.index("patch"), calls.index("run_coop"))
 
+    def test_main_applies_flyp_env_overrides_after_parsing(self):
+        import types
+        from unittest import mock
+        import kaggle_main
+
+        calls = []
+        captured = {}
+        args = types.SimpleNamespace(drm_weight=1.0, wise_alphas="0.0,0.1")
+        config_module = types.ModuleType("src.config")
+        config_module.parse_arguments = lambda: args
+        train_module = types.ModuleType("src.train_flyp")
+        train_module.main = lambda parsed_args: captured.setdefault("args", parsed_args)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            original_argv = sys.argv
+            original_drm = os.environ.get("FLYP_DRM_WEIGHT")
+            original_wise = os.environ.get("FLYP_WISE_ALPHAS")
+            try:
+                sys.argv = ["kaggle_main.py", "--mode=flyp"]
+                os.environ["FLYP_DRM_WEIGHT"] = "0.5"
+                os.environ["FLYP_WISE_ALPHAS"] = "0.0,0.05,0.1"
+                with mock.patch.object(kaggle_main, "ensure_repo_root", return_value=repo_root), \
+                     mock.patch.object(kaggle_main.os, "chdir"), \
+                     mock.patch.object(kaggle_main, "configure_import_path", side_effect=lambda root: calls.append("path")), \
+                     mock.patch.object(kaggle_main, "_ensure_deps", side_effect=lambda: calls.append("deps")), \
+                     mock.patch.object(kaggle_main, "_ensure_local_package_installed", side_effect=lambda root: calls.append("install")), \
+                     mock.patch.object(kaggle_main, "assert_cloned_repo_supports_runtime_flags", side_effect=lambda root: calls.append("guard")), \
+                     mock.patch.object(kaggle_main, "_patch_iwildcam_val", side_effect=lambda: calls.append("patch")), \
+                     mock.patch.object(kaggle_main, "_configure_wandb_from_kaggle_secret", side_effect=lambda: calls.append("wandb")), \
+                     mock.patch.object(kaggle_main, "prepare_iwildcam_layout", return_value="./data"), \
+                     mock.patch.dict(sys.modules, {"src.config": config_module, "src.train_flyp": train_module}):
+                    kaggle_main.main()
+            finally:
+                sys.argv = original_argv
+                if original_drm is None:
+                    os.environ.pop("FLYP_DRM_WEIGHT", None)
+                else:
+                    os.environ["FLYP_DRM_WEIGHT"] = original_drm
+                if original_wise is None:
+                    os.environ.pop("FLYP_WISE_ALPHAS", None)
+                else:
+                    os.environ["FLYP_WISE_ALPHAS"] = original_wise
+
+        self.assertEqual(captured["args"].drm_weight, 0.5)
+        self.assertEqual(captured["args"].wise_alphas, "0.0,0.05,0.1")
+
     def test_build_coop_training_argv_preserves_user_overrides(self):
         from kaggle_main import build_coop_training_argv
 

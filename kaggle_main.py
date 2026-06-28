@@ -131,6 +131,7 @@ FLYP_DEFAULTS = {
     "--save": "/kaggle/working/checkpoints/flyp_drm_wise_vitb16_iwildcamval.pt",
 }
 FLYP_DEFAULT_FLAGS = ["--wandb"]
+FLYP_DRM_WEIGHT = 1.0
 
 
 def strip_mode_args(argv):
@@ -590,7 +591,10 @@ def main():
         print(" ".join(sys.argv[1:]))
         from src.config import parse_arguments
         from src.train_flyp import main as run_flyp
-        run_flyp(parse_arguments())
+        args = parse_arguments()
+        args.drm_weight = float(os.environ.get("FLYP_DRM_WEIGHT", args.drm_weight))
+        args.wise_alphas = os.environ.get("FLYP_WISE_ALPHAS", args.wise_alphas)
+        run_flyp(args)
     else:
         sys.argv = build_coop_training_argv(data_location, user_args)
         print("Running Kaggle CoOp training with arguments:")
