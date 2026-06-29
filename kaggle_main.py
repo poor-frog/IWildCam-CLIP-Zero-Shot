@@ -161,7 +161,7 @@ def _keep_wandb_flag(default_flags):
     # env var missing – check Kaggle secrets
     try:
         from kaggle_secrets import UserSecretsClient
-        UserSecretsClient().get_secret("WANDB_API_KEY")
+        os.environ["WANDB_API_KEY"] = UserSecretsClient().get_secret("WANDB_API_KEY")
         return default_flags
     except Exception:
         return [f for f in default_flags if f != "--wandb"]
