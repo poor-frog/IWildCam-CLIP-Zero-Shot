@@ -1,3 +1,4 @@
+import copy
 import getpass
 import math
 import os
@@ -33,6 +34,7 @@ from src.models.zeroshot import (
     build_frozen_zeroshot_anchor,
 )
 from src.train_coop import build_eval_dataset, get_validation_score, log_wandb_summary
+from src.train_coop import _inject_seed_suffix, print_aggregated_summary
 
 
 def print_summary(summary_rows):
@@ -335,4 +337,20 @@ class SimpleNamespaceEncoder:
 
 
 if __name__ == "__main__":
-    main(parse_arguments())
+    args = parse_arguments()
+    if args.runs <= 1:
+        main(args)
+    else:
+        all_summaries = []
+        base_seed = args.seed
+        for run_idx in range(args.runs):
+            print(f"\n{'='*60}")
+            print(f"Run {run_idx + 1}/{args.runs} (seed={base_seed + run_idx})")
+            print(f"{'='*60}")
+            import copy as _copy
+            run_args = _copy.deepcopy(args)
+            run_args.seed = base_seed + run_idx
+            _inject_seed_suffix(run_args, run_idx)
+            summary = main(run_args)
+            all_summaries.append(summary)
+        print_aggregated_summary(all_summaries)

@@ -254,7 +254,82 @@ def main(args):
     log_wandb_summary(wandb, summary_rows)
     if wandb is not None:
         wandb.finish()
+    return summary_rows
+
+
+def _inject_seed_suffix(args, run_idx):
+    """Modify args for multi-seed run: append _seed{N} to wandb name and checkpoint paths."""
+    if run_idx == 0:
+        return
+    seed_suffix = f'_seed{run_idx}'
+    if args.wandb_run_name is not None:
+        args.wandb_run_name = args.wandb_run_name + seed_suffix
+    if args.save is not None:
+        p = Path(args.save)
+        stem = p.stem
+        if p.suffix:
+            args.save = str(p.with_name(f'{stem}{seed_suffix}{p.suffix}'))
+        else:
+            args.save = str(p) + seed_suffix
+    if args.best_checkpoint is not None:
+        p = Path(args.best_checkpoint)
+        stem = p.stem
+        if p.suffix:
+            args.best_checkpoint = str(p.with_name(f'{stem}{seed_suffix}{p.suffix}'))
+        else:
+            args.best_checkpoint = str(p) + seed_suffix
+
+
+def print_aggregated_summary(all_summaries):
+    """Print mean +/- std across runs for each split/metric."""
+    if not all_summaries:
+        return
+    num_runs = len(all_summaries)
+    # Group by dataset name
+    datasets = {}
+    for summary in all_summaries:
+        for dataset_name, top1, f1_macro in summary:
+            if dataset_name not in datasets:
+                datasets[dataset_name] = {'top1': [], 'f1_macro': []}
+            if top1 is not None:
+                datasets[dataset_name]['top1'].append(top1)
+            if f1_macro is not None:
+                datasets[dataset_name]['f1_macro'].append(f1_macro)
+    
+    print(f"\n=== Aggregated Results ({num_runs} runs) ===")
+    print("| Split         | Top-1 (mean±std)     | F1-macro (mean±std)  |")
+    print("| ------------- | -------------------- | -------------------- |")
+    for dataset_name in sorted(datasets.keys()):
+        d = datasets[dataset_name]
+        top1_str = "N/A"
+        if d['top1']:
+            mean = np.mean(d['top1'])
+            std = np.std(d['top1'])
+            top1_str = f"{mean*100:.2f}±{std*100:.2f}%"
+        f1_str = "N/A"
+        if d['f1_macro']:
+            mean = np.mean(d['f1_macro'])
+            std = np.std(d['f1_macro'])
+            f1_str = f"{mean*100:.2f}±{std*100:.2f}%"
+        print(f"| {dataset_name:<13} | {top1_str:<20} | {f1_str:<20} |")
+    print()
 
 
 if __name__ == "__main__":
-    main(parse_arguments())
+    import copy
+    args = parse_arguments()
+    if args.runs <= 1:
+        main(args)
+    else:
+        all_summaries = []
+        base_seed = args.seed
+        for run_idx in range(args.runs):
+            print(f"\n{'='*60}")
+            print(f"Run {run_idx + 1}/{args.runs} (seed={base_seed + run_idx})")
+            print(f"{'='*60}")
+            run_args = copy.deepcopy(args)
+            run_args.seed = base_seed + run_idx
+            _inject_seed_suffix(run_args, run_idx)
+            summary = main(run_args)
+            all_summaries.append(summary)
+        print_aggregated_summary(all_summaries)

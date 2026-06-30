@@ -18,4 +18,22 @@ def configure_maple_lora_args(args):
 
 
 if __name__ == "__main__":
-    main(configure_maple_lora_args(parse_arguments()))
+    import copy as _copy
+    from src.train_coop import _inject_seed_suffix, print_aggregated_summary
+
+    args = configure_maple_lora_args(parse_arguments())
+    if args.runs <= 1:
+        main(args)
+    else:
+        all_summaries = []
+        base_seed = args.seed
+        for run_idx in range(args.runs):
+            print(f"\n{'='*60}")
+            print(f"Run {run_idx + 1}/{args.runs} (seed={base_seed + run_idx})")
+            print(f"{'='*60}")
+            run_args = _copy.deepcopy(args)
+            run_args.seed = base_seed + run_idx
+            _inject_seed_suffix(run_args, run_idx)
+            summary = main(run_args)
+            all_summaries.append(summary)
+        print_aggregated_summary(all_summaries)

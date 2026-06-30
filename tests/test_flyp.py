@@ -30,6 +30,31 @@ class FlypModuleTest(unittest.TestCase):
         self.assertIsNotNone(image_features.grad)
         self.assertIsNotNone(text_features.grad)
 
+    def test_clip_loss_treats_duplicate_labels_as_positives(self):
+        from src.models.flyp import compute_flyp_clip_loss
+
+        image_features = torch.tensor([
+            [1.0, 0.0],
+            [0.95, 0.05],
+            [0.0, 1.0],
+        ])
+        text_features = torch.tensor([
+            [1.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+        ])
+        class_labels = torch.tensor([0, 0, 1])
+
+        instance_loss = compute_flyp_clip_loss(image_features, text_features, torch.tensor(10.0))
+        class_aware_loss = compute_flyp_clip_loss(
+            image_features,
+            text_features,
+            torch.tensor(10.0),
+            class_labels=class_labels,
+        )
+
+        self.assertLess(class_aware_loss.item(), instance_loss.item())
+
     def test_train_flyp_one_epoch_honors_max_train_batches(self):
         from src.models.flyp import train_flyp_one_epoch
 
@@ -138,6 +163,55 @@ class FlypModuleTest(unittest.TestCase):
         self.assertTrue(torch.isfinite(torch.tensor(stats.loss)))
 
 
+class FlypEvalCacheTest(unittest.TestCase):
+    def test_eval_reuses_zeroshot_classifier_when_state_unchanged(self):
+        from src.models.flyp import eval_flyp_single_dataset
+
+        class TinyEncoder(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.model = torch.nn.Linear(2, 2, bias=False)
+                self.train_preprocess = object()
+                self.val_preprocess = object()
+
+        dataset = object()
+        args = SimpleNamespace(device='cpu')
+        encoder = TinyEncoder()
+        classifier = torch.nn.Linear(2, 2, bias=False)
+
+        with patch('src.models.flyp.get_zeroshot_classifier', return_value=classifier) as mocked_build, \
+                patch('src.models.flyp.eval_coop_single_dataset', return_value={'top1': 0.1}) as mocked_eval:
+            eval_flyp_single_dataset(encoder, dataset, args)
+            eval_flyp_single_dataset(encoder, dataset, args)
+
+        self.assertEqual(mocked_build.call_count, 1)
+        self.assertEqual(mocked_eval.call_count, 2)
+
+    def test_eval_rebuilds_zeroshot_classifier_when_state_changes(self):
+        from src.models.flyp import eval_flyp_single_dataset
+
+        class TinyEncoder(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.model = torch.nn.Linear(2, 2, bias=False)
+                self.train_preprocess = object()
+                self.val_preprocess = object()
+
+        dataset = object()
+        args = SimpleNamespace(device='cpu')
+        encoder = TinyEncoder()
+        classifier = torch.nn.Linear(2, 2, bias=False)
+
+        with patch('src.models.flyp.get_zeroshot_classifier', return_value=classifier) as mocked_build, \
+                patch('src.models.flyp.eval_coop_single_dataset', return_value={'top1': 0.1}):
+            eval_flyp_single_dataset(encoder, dataset, args)
+            with torch.no_grad():
+                encoder.model.weight.add_(1.0)
+            eval_flyp_single_dataset(encoder, dataset, args)
+
+        self.assertEqual(mocked_build.call_count, 2)
+
+
 class FlypDrmTest(unittest.TestCase):
     def test_drm_loss_is_zero_when_model_unchanged(self):
         from src.models.flyp import compute_drm_loss
@@ -174,32 +248,134 @@ class FlypDrmTest(unittest.TestCase):
 
         self.assertIsNotNone(model.weight.grad)
 
-    def test_drm_gradient_matches_backpropagated_loss(self):
-        from src.models.flyp import add_drm_gradient, compute_drm_loss
+    def test_train_flyp_one_epoch_scales_clip_plus_drm_loss(self):
+        from src.models.flyp import train_flyp_one_epoch
 
-        expected_model = torch.nn.Linear(2, 2, bias=False)
-        actual_model = torch.nn.Linear(2, 2, bias=False)
-        actual_model.load_state_dict(expected_model.state_dict())
-        init_state = {name: tensor.detach().cpu().clone() for name, tensor in expected_model.state_dict().items()}
-        with torch.no_grad():
-            expected_model.weight.add_(1.0)
-            actual_model.weight.add_(1.0)
+        class TinyTokenizer:
+            def __call__(self, captions):
+                return torch.zeros(len(captions), 4, dtype=torch.long)
 
-        compute_drm_loss(expected_model, init_state, drm_weight=0.5).backward()
-        actual_model.weight.grad = torch.zeros_like(actual_model.weight)
-        add_drm_gradient(actual_model, init_state, drm_weight=0.5)
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.eye(2))
 
-        self.assertTrue(torch.allclose(actual_model.weight.grad, expected_model.weight.grad))
+            def forward(self, images, text):
+                features = images @ self.weight
+                return features, features, torch.ones(())
 
-    def test_drm_gradient_initializes_missing_grad(self):
-        from src.models.flyp import add_drm_gradient
+        class CapturingScaledLoss:
+            def __init__(self, loss):
+                self.loss = loss
+
+            def backward(self):
+                self.loss.backward()
+
+        class CapturingScaler:
+            def __init__(self):
+                self.scaled_loss = None
+
+            def scale(self, loss):
+                self.scaled_loss = CapturingScaledLoss(loss)
+                return self.scaled_loss
+
+            def unscale_(self, optimizer):
+                pass
+
+            def step(self, optimizer):
+                optimizer.step()
+
+            def update(self):
+                pass
+
+        model = TinyModel()
+        init_state = {name: torch.zeros_like(tensor) for name, tensor in model.state_dict().items()}
+        batch = {"images": torch.eye(2), "labels": torch.tensor([0, 1])}
+        args = SimpleNamespace(device="cpu", model="ViT-B-16", max_train_batches=1, use_amp=True)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.0)
+        scaler = CapturingScaler()
+
+        with patch("src.models.flyp.open_clip.get_tokenizer", return_value=TinyTokenizer()):
+            stats = train_flyp_one_epoch(
+                model,
+                [batch],
+                optimizer,
+                args,
+                ["frog", "deer"],
+                [lambda c: f"a photo of {c}."],
+                epoch=1,
+                init_state_dict=init_state,
+                drm_weight=0.25,
+                scaler=scaler,
+            )
+
+        self.assertGreater(stats.drm_loss, 0.0)
+        self.assertAlmostEqual(scaler.scaled_loss.loss.item(), stats.loss, places=6)
+
+    def test_train_flyp_one_epoch_checks_nonfinite_grads_after_amp_unscale(self):
+        from src.models.flyp import train_flyp_one_epoch
+
+        class TinyTokenizer:
+            def __call__(self, captions):
+                return torch.zeros(len(captions), 4, dtype=torch.long)
+
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.eye(2))
+                self.weight.register_hook(lambda grad: torch.full_like(grad, float("nan")))
+
+            def forward(self, images, text):
+                features = images @ self.weight
+                return features, features, torch.ones(())
+
+        class FakeScaledLoss:
+            def __init__(self, loss):
+                self.loss = loss
+
+            def backward(self):
+                self.loss.backward()
+
+        class FakeScaler:
+            def scale(self, loss):
+                return FakeScaledLoss(loss)
+
+            def unscale_(self, optimizer):
+                pass
+
+            def step(self, optimizer):
+                optimizer.step()
+
+            def update(self):
+                pass
+
+        model = TinyModel()
+        batch = {"images": torch.eye(2), "labels": torch.tensor([0, 1])}
+        args = SimpleNamespace(device="cpu", model="ViT-B-16", max_train_batches=1, use_amp=True)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+        with patch("src.models.flyp.open_clip.get_tokenizer", return_value=TinyTokenizer()):
+            with self.assertRaisesRegex(FloatingPointError, "non-finite gradient"):
+                train_flyp_one_epoch(
+                    model,
+                    [batch],
+                    optimizer,
+                    args,
+                    ["frog", "deer"],
+                    [lambda c: f"a photo of {c}."],
+                    epoch=1,
+                    scaler=FakeScaler(),
+                )
+
+    def test_drm_loss_gradient_matches_regularization_derivative(self):
+        from src.models.flyp import compute_drm_loss
 
         model = torch.nn.Linear(2, 2, bias=False)
         with torch.no_grad():
             model.weight.copy_(torch.tensor([[2.0, 3.0], [4.0, 5.0]]))
         init_state = {"weight": torch.ones_like(model.weight)}
 
-        add_drm_gradient(model, init_state, drm_weight=0.5)
+        compute_drm_loss(model, init_state, drm_weight=0.5).backward()
 
         expected = model.weight.detach() - init_state["weight"]
         self.assertTrue(torch.allclose(model.weight.grad, expected))
@@ -265,6 +441,35 @@ class FlypWiseTest(unittest.TestCase):
             wise_interpolate_state_dict(finetuned, zeroshot, alpha=0.5)
 
 
+class FlypFinalEvalDatasetTest(unittest.TestCase):
+    def test_tuned_validation_split_is_excluded_from_final_eval(self):
+        from src.train_flyp import final_eval_datasets
+
+        args = SimpleNamespace(
+            eval_datasets=["IWildCamIDVal", "IWildCamVal", "IWildCamID", "IWildCamOOD"],
+            val_dataset="IWildCamVal",
+            epochs=20,
+            wise_alphas="0.0,0.1",
+        )
+
+        self.assertEqual(
+            final_eval_datasets(args),
+            ["IWildCamIDVal", "IWildCamID", "IWildCamOOD"],
+        )
+
+    def test_validation_split_remains_when_not_used_for_tuning(self):
+        from src.train_flyp import final_eval_datasets
+
+        args = SimpleNamespace(
+            eval_datasets=["IWildCamVal", "IWildCamOOD"],
+            val_dataset="IWildCamVal",
+            epochs=0,
+            wise_alphas=None,
+        )
+
+        self.assertEqual(final_eval_datasets(args), ["IWildCamVal", "IWildCamOOD"])
+
+
 class FlypWiseParseTest(unittest.TestCase):
     def test_parse_wise_alphas_none_returns_empty(self):
         from src.train_flyp import parse_wise_alphas
@@ -317,6 +522,63 @@ class FlypUnpackClipForwardTest(unittest.TestCase):
         from src.models.flyp import unpack_clip_forward
         with self.assertRaises(ValueError):
             unpack_clip_forward(("i",))
+
+
+class FlypAnchorStateTest(unittest.TestCase):
+    def test_initialize_flyp_model_anchors_to_loaded_state(self):
+        import src.train_flyp as train_flyp
+
+        class LoadedEncoder(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.tensor([[9.0, 0.0], [0.0, 9.0]]))
+                self.train_preprocess = object()
+
+            def to(self, *args, **kwargs):
+                return self
+
+        class FreshEncoder(torch.nn.Module):
+            def __init__(self, args, keep_lang=False):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.tensor([[1.0, 0.0], [0.0, 1.0]]))
+                self.train_preprocess = object()
+
+            def to(self, *args, **kwargs):
+                return self
+
+            @classmethod
+            def load(cls, filename):
+                return LoadedEncoder()
+
+        args = SimpleNamespace(model='ViT-B-16', device='cpu', load='checkpoint.pt')
+
+        with patch.object(train_flyp, 'CLIPEncoder', FreshEncoder), \
+                patch.object(train_flyp, 'maybe_data_parallel', side_effect=lambda model, args: model):
+            model, anchor_state = train_flyp.initialize_flyp_model(args)
+
+        self.assertEqual(model.weight.detach().tolist(), [[9.0, 0.0], [0.0, 9.0]])
+        self.assertEqual(anchor_state['weight'].tolist(), [[9.0, 0.0], [0.0, 9.0]])
+
+    def test_initialize_flyp_model_without_load_anchors_to_fresh_state(self):
+        import src.train_flyp as train_flyp
+
+        class FreshEncoder(torch.nn.Module):
+            def __init__(self, args, keep_lang=False):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.tensor([[1.0, 0.0], [0.0, 1.0]]))
+                self.train_preprocess = object()
+
+            def to(self, *args, **kwargs):
+                return self
+
+        args = SimpleNamespace(model='ViT-B-16', device='cpu', load=None)
+
+        with patch.object(train_flyp, 'CLIPEncoder', FreshEncoder), \
+                patch.object(train_flyp, 'maybe_data_parallel', side_effect=lambda model, args: model):
+            model, anchor_state = train_flyp.initialize_flyp_model(args)
+
+        self.assertEqual(model.weight.detach().tolist(), [[1.0, 0.0], [0.0, 1.0]])
+        self.assertEqual(anchor_state['weight'].tolist(), [[1.0, 0.0], [0.0, 1.0]])
 
 
 class FlypCloneStateDictTest(unittest.TestCase):

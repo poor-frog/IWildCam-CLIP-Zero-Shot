@@ -146,7 +146,7 @@ KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_coop.py \
     --save=./checkpoints/coop_prompt_learner.pt
 ```
 
-During training, CoOp validates after every epoch on `--val-dataset` (default: `IWildCamIDVal`), saves the best prompt learner by `--best-metric` (default: `F1-macro_all` with `top1` fallback), and loads that best checkpoint before the final `--eval-datasets` report. With `--save=./checkpoints/coop_prompt_learner.pt`, the best checkpoint is written to `./checkpoints/coop_prompt_learner_best.pt`; use `--best-checkpoint=PATH` to override it or `--no-load-best-for-eval` to report the last epoch instead.
+During training, CoOp validates after every epoch on `--val-dataset` (default: `IWildCamVal`), saves the best prompt learner by `--best-metric` (default: `F1-macro_all` with `top1` fallback), and loads that best checkpoint before the final `--eval-datasets` report. With `--save=./checkpoints/coop_prompt_learner.pt`, the best checkpoint is written to `./checkpoints/coop_prompt_learner_best.pt`; use `--best-checkpoint=PATH` to override it or `--no-load-best-for-eval` to report the last epoch instead.
 
 The Phase 1.1 CoOp baseline results and checkpoint mapping are recorded in [`docs/results.md`](docs/results.md). Use `checkpoints/coop_training_vitb32_best_epoch13_f1_2573.pt` as the canonical Phase 1.1 checkpoint for reproduction and Phase 2 comparisons.
 

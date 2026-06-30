@@ -40,14 +40,27 @@ def build_flyp_captions(labels, classnames, templates, offset=0):
     return captions
 
 
-def compute_flyp_clip_loss(image_features, text_features, logit_scale):
+def multi_positive_cross_entropy(logits, positive_mask):
+    log_probs = F.log_softmax(logits, dim=1)
+    masked_log_probs = log_probs.masked_fill(~positive_mask, float("-inf"))
+    return -torch.logsumexp(masked_log_probs, dim=1).mean()
+
+
+def compute_flyp_clip_loss(image_features, text_features, logit_scale, class_labels=None):
     image_features = image_features / image_features.norm(dim=-1, keepdim=True).clamp_min(1e-12)
     text_features = text_features / text_features.norm(dim=-1, keepdim=True).clamp_min(1e-12)
     scale = logit_scale.flatten()[0] if hasattr(logit_scale, "flatten") else logit_scale
     logits_per_image = scale * image_features @ text_features.t()
     logits_per_text = logits_per_image.t()
     labels = torch.arange(logits_per_image.shape[0], device=logits_per_image.device)
-    return (F.cross_entropy(logits_per_image, labels) + F.cross_entropy(logits_per_text, labels)) / 2
+    if class_labels is None:
+        return (F.cross_entropy(logits_per_image, labels) + F.cross_entropy(logits_per_text, labels)) / 2
+
+    class_labels = class_labels.to(logits_per_image.device)
+    positive_mask = class_labels[:, None].eq(class_labels[None, :])
+    image_loss = multi_positive_cross_entropy(logits_per_image, positive_mask)
+    text_loss = multi_positive_cross_entropy(logits_per_text, positive_mask.t())
+    return (image_loss + text_loss) / 2
 
 
 def unpack_clip_forward(outputs):
@@ -84,38 +97,6 @@ def compute_drm_loss(model, init_state_dict, drm_weight):
     return float(drm_weight) * total
 
 
-def add_drm_gradient(model, init_state_dict, drm_weight):
-    if drm_weight == 0.0:
-        return
-
-    model = unwrap_model(model)
-    scale = 2.0 * float(drm_weight)
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
-            continue
-        if name not in init_state_dict:
-            raise KeyError(f"Initial state dict is missing parameter {name!r}.")
-        had_grad = param.grad is not None
-        if not had_grad:
-            param.grad = torch.empty_like(param)
-        param_flat = param.flatten()
-        grad_flat = param.grad.flatten()
-        initial_flat = init_state_dict[name].flatten()
-        for start in range(0, param_flat.numel(), DRM_CHUNK_SIZE):
-            end = start + DRM_CHUNK_SIZE
-            param_chunk = param_flat[start:end]
-            grad_chunk = grad_flat[start:end]
-            initial_chunk = initial_flat[start:end].to(device=param.device, dtype=param.dtype)
-            with torch.no_grad():
-                if had_grad:
-                    grad_chunk.add_(param_chunk, alpha=scale)
-                    grad_chunk.add_(initial_chunk, alpha=-scale)
-                else:
-                    grad_chunk.copy_(param_chunk)
-                    grad_chunk.sub_(initial_chunk)
-                    grad_chunk.mul_(scale)
-
-
 def wise_interpolate_state_dict(finetuned_state_dict, zeroshot_state_dict, alpha):
     if not 0.0 <= alpha <= 1.0:
         raise ValueError("WiSE alpha must be in [0, 1].")
@@ -139,6 +120,30 @@ def wise_interpolate_state_dict(finetuned_state_dict, zeroshot_state_dict, alpha
             continue
         interpolated[name] = (1.0 - alpha) * finetuned_tensor + alpha * zeroshot_tensor
     return interpolated
+
+
+def flyp_zeroshot_cache_key(args, clip_encoder):
+    model = clip_encoder.model
+    state_versions = tuple((name, param._version) for name, param in model.named_parameters())
+    return (
+        getattr(args, "device", None),
+        getattr(args, "train_dataset", None),
+        getattr(args, "template", None),
+        getattr(args, "data_location", None),
+        getattr(args, "batch_size", None),
+        state_versions,
+    )
+
+
+def get_cached_flyp_zeroshot_classifier(args, clip_encoder):
+    cache_key = flyp_zeroshot_cache_key(args, clip_encoder)
+    cached = getattr(clip_encoder, "_flyp_zeroshot_classifier_cache", None)
+    if cached is not None and cached.get("key") == cache_key:
+        return cached["classifier"]
+
+    classifier = get_zeroshot_classifier(args, clip_encoder.model).to(args.device)
+    clip_encoder._flyp_zeroshot_classifier_cache = {"key": cache_key, "classifier": classifier}
+    return classifier
 
 
 def train_flyp_one_epoch(
@@ -176,8 +181,14 @@ def train_flyp_one_epoch(
         autocast_context = torch.amp.autocast("cuda", enabled=True) if use_autocast else nullcontext()
         with autocast_context:
             image_features, text_features, logit_scale = unpack_clip_forward(model(images, text_tokens))
-            clip_loss = compute_flyp_clip_loss(image_features, text_features, logit_scale)
-            loss = clip_loss
+            clip_loss = compute_flyp_clip_loss(image_features, text_features, logit_scale, class_labels=labels)
+            if drm_weight != 0.0:
+                if init_state_dict is None:
+                    raise ValueError("init_state_dict is required when drm_weight is non-zero.")
+                drm_loss = compute_drm_loss(model, init_state_dict, drm_weight)
+            else:
+                drm_loss = clip_loss.new_zeros(())
+            loss = clip_loss + drm_loss
         if not torch.isfinite(loss):
             raise FloatingPointError(f"FLYP produced non-finite loss at epoch {epoch}, batch {batch_index}")
 
@@ -187,18 +198,9 @@ def train_flyp_one_epoch(
             scaler.unscale_(optimizer)
         else:
             loss.backward()
-        if drm_weight != 0.0:
-            if init_state_dict is None:
-                raise ValueError("init_state_dict is required when drm_weight is non-zero.")
-            add_drm_gradient(model, init_state_dict, drm_weight)
-            with torch.no_grad():
-                drm_loss = compute_drm_loss(model, init_state_dict, drm_weight)
-        else:
-            drm_loss = clip_loss.new_zeros(())
-        if scaler is None:
-            for name, param in model.named_parameters():
-                if param.grad is not None and not torch.isfinite(param.grad).all():
-                    raise FloatingPointError(f"FLYP produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
+        for name, param in model.named_parameters():
+            if param.grad is not None and not torch.isfinite(param.grad).all():
+                raise FloatingPointError(f"FLYP produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
         previous_scale = scaler.get_scale() if scaler is not None and hasattr(scaler, "get_scale") else None
         if scaler is not None:
             scaler.step(optimizer)
@@ -231,6 +233,6 @@ def train_flyp_one_epoch(
 
 def eval_flyp_single_dataset(model, dataset, args):
     clip_encoder = unwrap_model(model)
-    classification_head = get_zeroshot_classifier(args, clip_encoder.model).to(args.device)
+    classification_head = get_cached_flyp_zeroshot_classifier(args, clip_encoder)
     image_classifier = ImageClassifier(clip_encoder, classification_head).to(args.device)
     return eval_coop_single_dataset(image_classifier, dataset, args, desc="FLYP eval")

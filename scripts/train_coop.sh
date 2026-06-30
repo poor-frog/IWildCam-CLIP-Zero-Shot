@@ -17,4 +17,5 @@ KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_coop.py \
   --epochs=50 \
   --lr=0.002 \
   --wd=1e-5 \
+  --val-dataset=IWildCamVal \
   --save=./checkpoints/coop_prompt_learner.pt

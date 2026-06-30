@@ -22,6 +22,22 @@ class KaggleMainTest(unittest.TestCase):
             ["kaggle_main.py", "--model=ViT-B/32", "--epochs=10"],
         )
 
+    def test_parse_mode_defaults_to_coop_when_no_override_is_set(self):
+        import kaggle_main
+
+        original_override = kaggle_main._KERNEL_TRAIN_METHOD
+        original_env = os.environ.get("TRAIN_METHOD")
+        try:
+            os.environ.pop("TRAIN_METHOD", None)
+            self.assertIsNone(original_override)
+            self.assertEqual(kaggle_main.parse_mode(["kaggle_main.py"]), "coop")
+        finally:
+            kaggle_main._KERNEL_TRAIN_METHOD = original_override
+            if original_env is None:
+                os.environ.pop("TRAIN_METHOD", None)
+            else:
+                os.environ["TRAIN_METHOD"] = original_env
+
     def test_resolve_kaggle_data_location_prefers_local_working_tree_data(self):
         from kaggle_main import resolve_kaggle_data_location
 

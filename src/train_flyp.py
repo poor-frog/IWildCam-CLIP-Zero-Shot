@@ -58,12 +58,34 @@ def clone_state_dict(model):
     return {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
 
 
+def initialize_flyp_model(args):
+    model = maybe_data_parallel(CLIPEncoder(args, keep_lang=True).to(args.device), args)
+    if hasattr(model, "module"):
+        print(f"Using DataParallel on {torch.cuda.device_count()} CUDA devices")
+    if args.load is not None:
+        loaded = CLIPEncoder.load(args.load)
+        model = maybe_data_parallel(loaded.to(args.device), args)
+    anchor_state_dict = clone_state_dict(unwrap_model(model))
+    return model, anchor_state_dict
+
+
 def parse_wise_alphas(raw_value):
     if raw_value is None:
         return []
     if isinstance(raw_value, (list, tuple)):
         return [float(value) for value in raw_value]
     return [float(value.strip()) for value in str(raw_value).split(",") if value.strip()]
+
+
+def final_eval_datasets(args):
+    eval_datasets = list(args.eval_datasets or [])
+    validation_split = getattr(args, "val_dataset", None)
+    used_for_tuning = validation_split is not None and (
+        getattr(args, "epochs", 0) > 0 or bool(parse_wise_alphas(getattr(args, "wise_alphas", None)))
+    )
+    if not used_for_tuning:
+        return eval_datasets
+    return [dataset_name for dataset_name in eval_datasets if dataset_name != validation_split]
 
 
 def load_wise_interpolated_state(model, finetuned_state_dict, zeroshot_state_dict, alpha):
@@ -83,22 +105,14 @@ def main(args):
         args.template = "iwildcam_template"
     ensure_open_clip_for_flyp(args.model)
 
-    clip_encoder = CLIPEncoder(args, keep_lang=True).to(args.device)
+    model, zeroshot_state_dict = initialize_flyp_model(args)
     train_dataset_class = getattr(datasets, args.train_dataset)
     train_data = train_dataset_class(
-        clip_encoder.train_preprocess,
+        unwrap_model(model).train_preprocess,
         location=args.data_location,
         batch_size=args.batch_size,
         num_workers=args.workers,
     )
-    model = maybe_data_parallel(clip_encoder, args)
-    if hasattr(model, "module"):
-        print(f"Using DataParallel on {torch.cuda.device_count()} CUDA devices")
-    zeroshot_state_dict = clone_state_dict(unwrap_model(model))
-
-    if args.load is not None:
-        loaded = CLIPEncoder.load(args.load)
-        model = maybe_data_parallel(loaded.to(args.device), args)
 
     optimizer = torch.optim.AdamW(
         [param for param in model.parameters() if param.requires_grad],
@@ -222,8 +236,9 @@ def main(args):
         print(f"Saved FLYP encoder to {save_path}")
 
     summary_rows = []
-    if args.eval_datasets is not None:
-        for dataset_name in args.eval_datasets:
+    eval_dataset_names = final_eval_datasets(args)
+    if eval_dataset_names:
+        for dataset_name in eval_dataset_names:
             print(f"Evaluating FLYP on {dataset_name}...")
             eval_dataset = build_eval_dataset(dataset_name, unwrap_model(model), args)
             results = eval_flyp_single_dataset(model, eval_dataset, args)

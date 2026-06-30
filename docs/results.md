@@ -88,6 +88,40 @@ KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_coop.py \
     --load=./checkpoints/coop_training_vitb32_best_epoch13_f1_2573.pt
 ```
 
+
+## CoOp baseline with corrected OOD validation split
+
+The Phase 1.1 baseline above used `IWildCamIDVal` for checkpoint selection. For corrected OOD selection, the same
+CoOp training with `--val-dataset=IWildCamVal` should be rerun. The `--runs` flag supports multi-seed variance reporting.
+
+### Corrected CoOp training (multi-seed)
+
+```bash
+KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=. python src/train_coop.py \
+    --model=ViT-B/32 \
+    --train-dataset=IWildCam \
+    --eval-datasets=IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD \
+    --data-location=./data \
+    --batch-size=32 \
+    --workers=4 \
+    --n-ctx=16 \
+    --ctx-init="a photo of a" \
+    --class-token-position=end \
+    --epochs=50 \
+    --lr=0.002 \
+    --wd=1e-5 \
+    --val-dataset=IWildCamVal \
+    --best-metric=F1-macro_all \
+    --runs=3 \
+    --wandb \
+    --wandb-project=PoorFrogs \
+    --wandb-run-name=coop-vit-b32-val-ood-selected \
+    --save=./checkpoints/coop_vitb32_val.pt
+```
+
+This runs 3 independent seeds (9, 10, 11 by default), selects the best checkpoint per seed on `IWildCamVal`,
+evaluates on all splits, and prints an aggregated mean ± std table at the end.
+
 ## Corrected OOD comparison criteria
 
 For corrected OOD-generalization studies, select models and hyperparameters using `IWildCamVal` only. Compare final reports against the CoOp Phase 1.1 baseline above using:
@@ -120,7 +154,7 @@ Same environment as Phase 1.1 CoOp (Kaggle Tesla P100 16GB).
 | Epochs | 9 |
 | Learning rate | `0.002` |
 | Weight decay | `1e-5` |
-| Validation split | Historical text used `IWildCamIDVal`; corrected OOD studies should use `IWildCamVal` |
+| Validation split | `IWildCamVal` (corrected OOD default; older runs may use `IWildCamIDVal`) |
 | Best-checkpoint metric | `F1-macro_all` |
 | Kaggle mode | `--mode=full_maple` |
 
