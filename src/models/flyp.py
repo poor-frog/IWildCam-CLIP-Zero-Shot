@@ -198,9 +198,10 @@ def train_flyp_one_epoch(
             scaler.unscale_(optimizer)
         else:
             loss.backward()
-        for name, param in model.named_parameters():
-            if param.grad is not None and not torch.isfinite(param.grad).all():
-                raise FloatingPointError(f"FLYP produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
+        if scaler is None:
+            for name, param in model.named_parameters():
+                if param.grad is not None and not torch.isfinite(param.grad).all():
+                    raise FloatingPointError(f"FLYP produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
         previous_scale = scaler.get_scale() if scaler is not None and hasattr(scaler, "get_scale") else None
         if scaler is not None:
             scaler.step(optimizer)

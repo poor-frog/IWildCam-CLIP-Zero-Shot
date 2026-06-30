@@ -312,7 +312,7 @@ class FlypDrmTest(unittest.TestCase):
         self.assertGreater(stats.drm_loss, 0.0)
         self.assertAlmostEqual(scaler.scaled_loss.loss.item(), stats.loss, places=6)
 
-    def test_train_flyp_one_epoch_checks_nonfinite_grads_after_amp_unscale(self):
+    def test_train_flyp_one_epoch_lets_grad_scaler_skip_nonfinite_amp_step(self):
         from src.models.flyp import train_flyp_one_epoch
 
         class TinyTokenizer:
@@ -336,36 +336,57 @@ class FlypDrmTest(unittest.TestCase):
             def backward(self):
                 self.loss.backward()
 
-        class FakeScaler:
+        class FakeSkippingScaler:
+            def __init__(self):
+                self.calls = []
+                self.scale_value = 8.0
+
             def scale(self, loss):
+                self.calls.append("scale")
                 return FakeScaledLoss(loss)
 
             def unscale_(self, optimizer):
-                pass
+                self.calls.append("unscale")
+
+            def get_scale(self):
+                return self.scale_value
 
             def step(self, optimizer):
-                optimizer.step()
+                self.calls.append("step")
 
             def update(self):
-                pass
+                self.calls.append("update")
+                self.scale_value = 4.0
+
+        class FakeScheduler:
+            def __init__(self):
+                self.steps = 0
+
+            def step(self):
+                self.steps += 1
 
         model = TinyModel()
         batch = {"images": torch.eye(2), "labels": torch.tensor([0, 1])}
         args = SimpleNamespace(device="cpu", model="ViT-B-16", max_train_batches=1, use_amp=True)
         optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+        scaler = FakeSkippingScaler()
+        scheduler = FakeScheduler()
 
         with patch("src.models.flyp.open_clip.get_tokenizer", return_value=TinyTokenizer()):
-            with self.assertRaisesRegex(FloatingPointError, "non-finite gradient"):
-                train_flyp_one_epoch(
-                    model,
-                    [batch],
-                    optimizer,
-                    args,
-                    ["frog", "deer"],
-                    [lambda c: f"a photo of {c}."],
-                    epoch=1,
-                    scaler=FakeScaler(),
-                )
+            train_flyp_one_epoch(
+                model,
+                [batch],
+                optimizer,
+                args,
+                ["frog", "deer"],
+                [lambda c: f"a photo of {c}."],
+                epoch=1,
+                scaler=scaler,
+                scheduler=scheduler,
+            )
+
+        self.assertEqual(scaler.calls, ["scale", "unscale", "step", "update"])
+        self.assertEqual(scheduler.steps, 0)
 
     def test_drm_loss_gradient_matches_regularization_derivative(self):
         from src.models.flyp import compute_drm_loss
