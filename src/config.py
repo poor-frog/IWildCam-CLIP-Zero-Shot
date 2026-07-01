@@ -109,7 +109,8 @@ def parse_arguments():
     parser.add_argument("--num-ood-hp-examples", type=int, default=-1, help="Subsample IWildCamVal/IWildCamOODVal to N examples for HP selection; -1 uses the full split.")
     parser.add_argument("--class-balanced-ood", action="store_true", help="Use class-balanced sampling when --num-ood-hp-examples subsamples OOD validation.")
     parser.add_argument("--no-class-balanced-ood", dest="class_balanced_ood", action="store_false", help="Disable class-balanced OOD validation subsampling when a Kaggle mode enables it by default.")
-    parser.add_argument("--drm-weight", type=float, default=0.0, help="Optional DRM L2 regularization weight toward the initial CLIP weights during FLYP training.")
+    parser.add_argument("--drm-weight", type=float, default=0.0, help="Optional normalized anchor-L2 weight toward the initial CLIP weights during FLYP training.")
+    parser.add_argument("--drm-warmup-epochs", type=int, default=0, help="Linearly warm up --drm-weight over this many epochs; 0 disables warmup.")
     parser.add_argument("--wise-alphas", type=str, default=None, help="Optional comma-separated WiSE-FT alpha grid; alpha=0 is fine-tuned, alpha=1 is zero-shot init. Omit to disable WiSE selection.")
     parser.add_argument("--wise-eval-alpha", type=float, default=None, help="Optional single WiSE-FT alpha to apply before final FLYP evaluation.")
 

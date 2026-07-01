@@ -160,6 +160,10 @@ def main(args):
         if wandb is not None:
             wandb.log({
                 "train/epoch_loss": stats.loss,
+                "train/clip_loss": stats.clip_loss,
+                "train/drm_loss": stats.drm_loss,
+                "train/drm_to_clip_ratio": stats.drm_to_clip_ratio,
+                "train/drm_effective_weight": stats.drm_effective_weight,
                 "train/lr": stats.lr,
                 "epoch": epoch,
             })

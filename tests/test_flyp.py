@@ -213,6 +213,73 @@ class FlypEvalCacheTest(unittest.TestCase):
 
 
 class FlypDrmTest(unittest.TestCase):
+    def test_drm_loss_uses_mean_squared_delta_not_parameter_sum(self):
+        from src.models.flyp import compute_drm_loss
+
+        model = torch.nn.Linear(2, 2, bias=False)
+        init_state = {name: torch.zeros_like(tensor) for name, tensor in model.state_dict().items()}
+        with torch.no_grad():
+            model.weight.fill_(2.0)
+
+        loss = compute_drm_loss(model, init_state, drm_weight=0.5)
+
+        self.assertAlmostEqual(loss.item(), 2.0)
+
+    def test_drm_loss_excludes_logit_scale(self):
+        from src.models.flyp import compute_drm_loss
+
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(2))
+                self.logit_scale = torch.nn.Parameter(torch.tensor(10.0))
+
+        model = TinyModel()
+        init_state = {name: torch.zeros_like(tensor) for name, tensor in model.state_dict().items()}
+
+        loss = compute_drm_loss(model, init_state, drm_weight=1.0)
+
+        self.assertAlmostEqual(loss.item(), 1.0)
+
+    def test_drm_warmup_scales_effective_weight_and_ratio(self):
+        from src.models.flyp import train_flyp_one_epoch
+
+        class TinyTokenizer:
+            def __call__(self, captions):
+                return torch.zeros(len(captions), 4, dtype=torch.long)
+
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.eye(2))
+
+            def forward(self, images, text):
+                del text
+                features = images @ self.weight
+                return features, features, torch.ones(())
+
+        model = TinyModel()
+        init_state = {name: torch.zeros_like(tensor) for name, tensor in model.state_dict().items()}
+        batch = {"images": torch.eye(2), "labels": torch.tensor([0, 1])}
+        args = SimpleNamespace(device="cpu", model="ViT-B-16", max_train_batches=1, drm_warmup_epochs=4)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.0)
+
+        with patch("src.models.flyp.open_clip.get_tokenizer", return_value=TinyTokenizer()):
+            stats = train_flyp_one_epoch(
+                model,
+                [batch],
+                optimizer,
+                args,
+                ["frog", "deer"],
+                [lambda c: f"a photo of {c}."],
+                epoch=2,
+                init_state_dict=init_state,
+                drm_weight=2.0,
+            )
+
+        self.assertAlmostEqual(stats.drm_effective_weight, 1.0)
+        self.assertGreater(stats.drm_to_clip_ratio, 0.0)
+
     def test_drm_loss_is_zero_when_model_unchanged(self):
         from src.models.flyp import compute_drm_loss
 
@@ -398,7 +465,7 @@ class FlypDrmTest(unittest.TestCase):
 
         compute_drm_loss(model, init_state, drm_weight=0.5).backward()
 
-        expected = model.weight.detach() - init_state["weight"]
+        expected = 2 * 0.5 * (model.weight.detach() - init_state["weight"]) / model.weight.numel()
         self.assertTrue(torch.allclose(model.weight.grad, expected))
 
 

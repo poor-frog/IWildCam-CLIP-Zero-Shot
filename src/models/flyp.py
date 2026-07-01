@@ -20,10 +20,13 @@ class FlypTrainStats:
     loss: float
     clip_loss: float = 0.0
     drm_loss: float = 0.0
+    drm_to_clip_ratio: float = 0.0
+    drm_effective_weight: float = 0.0
     lr: float | None = None
 
 
 DRM_CHUNK_SIZE = 1_000_000
+DRM_EXCLUDED_PARAMETER_NAMES = frozenset({"logit_scale"})
 
 
 def build_flyp_captions(labels, classnames, templates, offset=0):
@@ -71,20 +74,30 @@ def unpack_clip_forward(outputs):
     return outputs[0], outputs[1], outputs[2]
 
 
+def compute_drm_effective_weight(drm_weight, epoch, warmup_epochs):
+    if drm_weight == 0.0:
+        return 0.0
+    if warmup_epochs is None or warmup_epochs <= 0:
+        return float(drm_weight)
+    return float(drm_weight) * min(1.0, float(epoch) / float(warmup_epochs))
+
+
 def compute_drm_loss(model, init_state_dict, drm_weight):
     model = unwrap_model(model)
     if drm_weight == 0.0:
         return next(model.parameters()).new_zeros(())
 
     total = None
+    total_params = 0
     current_state = dict(model.named_parameters())
     for name, param in current_state.items():
-        if not param.requires_grad:
+        if not param.requires_grad or name in DRM_EXCLUDED_PARAMETER_NAMES:
             continue
         if name not in init_state_dict:
             raise KeyError(f"Initial state dict is missing parameter {name!r}.")
         param_flat = param.flatten()
         initial_flat = init_state_dict[name].flatten()
+        total_params += param_flat.numel()
         for start in range(0, param_flat.numel(), DRM_CHUNK_SIZE):
             end = start + DRM_CHUNK_SIZE
             param_chunk = param_flat[start:end]
@@ -92,9 +105,9 @@ def compute_drm_loss(model, init_state_dict, drm_weight):
             component = (param_chunk - initial_chunk).pow(2).sum()
             total = component if total is None else total + component
 
-    if total is None:
+    if total is None or total_params == 0:
         return next(model.parameters()).new_zeros(())
-    return float(drm_weight) * total
+    return float(drm_weight) * total / total_params
 
 
 def wise_interpolate_state_dict(finetuned_state_dict, zeroshot_state_dict, alpha):
@@ -161,6 +174,11 @@ def train_flyp_one_epoch(
 ):
     model.train()
     tokenizer = open_clip.get_tokenizer(args.model)
+    drm_effective_weight = compute_drm_effective_weight(
+        drm_weight,
+        epoch,
+        getattr(args, "drm_warmup_epochs", 0),
+    )
     total_loss = 0.0
     total_clip_loss = 0.0
     total_drm_loss = 0.0
@@ -182,10 +200,10 @@ def train_flyp_one_epoch(
         with autocast_context:
             image_features, text_features, logit_scale = unpack_clip_forward(model(images, text_tokens))
             clip_loss = compute_flyp_clip_loss(image_features, text_features, logit_scale, class_labels=labels)
-            if drm_weight != 0.0:
+            if drm_effective_weight != 0.0:
                 if init_state_dict is None:
                     raise ValueError("init_state_dict is required when drm_weight is non-zero.")
-                drm_loss = compute_drm_loss(model, init_state_dict, drm_weight)
+                drm_loss = compute_drm_loss(model, init_state_dict, drm_effective_weight)
             else:
                 drm_loss = clip_loss.new_zeros(())
             loss = clip_loss + drm_loss
@@ -228,6 +246,8 @@ def train_flyp_one_epoch(
         loss=total_loss / total_seen,
         clip_loss=total_clip_loss / total_seen,
         drm_loss=total_drm_loss / total_seen,
+        drm_to_clip_ratio=total_drm_loss / max(total_clip_loss, 1e-12),
+        drm_effective_weight=drm_effective_weight,
         lr=current_lr,
     )
 

@@ -209,6 +209,7 @@ class KaggleMainTest(unittest.TestCase):
                 'parser.add_argument("--class-bias-calibration")\n'
                 'parser.add_argument("--class-bias-scale-grid")\n'
                 'parser.add_argument("--drm-weight")\n'
+                'parser.add_argument("--drm-warmup-epochs")\n'
                 'parser.add_argument("--wise-alphas")\n'
                 'parser.add_argument("--wise-eval-alpha")\n',
                 encoding="utf-8",
@@ -540,6 +541,7 @@ class KaggleMainTest(unittest.TestCase):
         self.assertIn("--val-dataset=IWildCamVal", argv)
         self.assertIn("--best-metric=F1-macro_all", argv)
         self.assertIn("--drm-weight=1.0", argv)
+        self.assertIn("--drm-warmup-epochs=0", argv)
         self.assertIn("--wise-alphas=0.0,0.05,0.1,0.15,0.2", argv)
         self.assertIn("--wandb-run-name=flyp-drm-wise-vit-b16-iwildcamval", argv)
         self.assertIn("--save=/kaggle/working/checkpoints/flyp_drm_wise_vitb16_iwildcamval.pt", argv)
