@@ -11,6 +11,7 @@ from src.config import parse_arguments
 from src.models.clip_encoder import CLIPEncoder
 from src.models.coop import maybe_data_parallel, unwrap_model
 from src.models.flyp import eval_flyp_single_dataset, train_flyp_one_epoch, wise_interpolate_state_dict
+from src.models.tail_prototype import build_class_prototypes_from_loader
 from src.train_coop import build_eval_dataset, get_validation_score, log_wandb_summary
 from src.train_maple_full import build_step_lr_scheduler, init_wandb
 
@@ -97,6 +98,35 @@ def should_use_flyp_amp(args):
     return str(args.device).startswith("cuda") and getattr(args, "maple_precision", "fp32") == "amp"
 
 
+def maybe_build_tail_prototypes(model, train_data, args):
+    tail_weight = float(getattr(args, "tail_proto_weight", 0.0) or 0.0)
+    if tail_weight == 0.0:
+        return None, None
+
+    print(
+        "Building frozen Tail-Aware FLYP class prototypes "
+        f"(scale={getattr(args, 'tail_proto_scale', 50.0):g}, weight={tail_weight:g})..."
+    )
+    prototypes, class_counts = build_class_prototypes_from_loader(
+        model,
+        train_data.train_loader,
+        args.device,
+        num_classes=len(train_data.classnames),
+        max_batches=getattr(args, "tail_proto_max_batches", None),
+    )
+    missing_classes = int((class_counts == 0).sum().item())
+    print(
+        "Built Tail-Aware FLYP prototypes: "
+        f"{len(class_counts) - missing_classes}/{len(class_counts)} classes covered"
+    )
+    if missing_classes:
+        print(
+            "Warning: some classes have no prototype. This is expected only for smoke tests "
+            "or deliberately capped --tail-proto-max-batches runs."
+        )
+    return prototypes, class_counts
+
+
 def main(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -113,6 +143,7 @@ def main(args):
         batch_size=args.batch_size,
         num_workers=args.workers,
     )
+    tail_prototypes, tail_class_counts = maybe_build_tail_prototypes(model, train_data, args)
 
     optimizer = torch.optim.AdamW(
         [param for param in model.parameters() if param.requires_grad],
@@ -153,6 +184,8 @@ def main(args):
             epoch,
             init_state_dict=zeroshot_state_dict,
             drm_weight=getattr(args, "drm_weight", 0.0),
+            tail_prototypes=tail_prototypes,
+            tail_class_counts=tail_class_counts,
             scheduler=scheduler,
             scaler=scaler,
         )
@@ -162,8 +195,12 @@ def main(args):
                 "train/epoch_loss": stats.loss,
                 "train/clip_loss": stats.clip_loss,
                 "train/drm_loss": stats.drm_loss,
+                "train/tail_loss": stats.tail_loss,
                 "train/drm_to_clip_ratio": stats.drm_to_clip_ratio,
+                "train/tail_to_clip_ratio": stats.tail_to_clip_ratio,
                 "train/drm_effective_weight": stats.drm_effective_weight,
+                "train/tail_proto_weight": stats.tail_proto_weight,
+                "train/tail_proto_scale": stats.tail_proto_scale,
                 "train/lr": stats.lr,
                 "epoch": epoch,
             })

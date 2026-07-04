@@ -12,103 +12,9 @@ DEFAULT_KAGGLE_DATASET_CANDIDATES = [
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_GITHUB_REPO = "https://github.com/poor-frog/IWildCam-CLIP-Zero-Shot.git"
 DEFAULT_KAGGLE_WORKING_REPO = Path("/kaggle/working/IWildCam-CLIP-Zero-Shot")
-FLYP_WISE_FINE_ALPHAS = "0.0,0.05,0.1,0.15,0.2"
-
-COOP_DEFAULTS = {
-    "--model": "ViT-B/32",
-    "--train-dataset": "IWildCam",
-    "--eval-datasets": "IWildCamIDVal,IWildCamID,IWildCamOOD",
-    "--batch-size": "32",
-    "--workers": "4",
-    "--n-ctx": "16",
-    "--ctx-init": "a photo of a",
-    "--epochs": "15",
-    "--lr": "0.002",
-    "--wd": "1e-5",
-    "--val-dataset": "IWildCamVal",
-    "--best-metric": "F1-macro_all",
-    "--wandb-project": "PoorFrogs",
-    "--wandb-run-name": "coop-vit-b32-phase11-best-f1",
-    "--save": "./checkpoints/coop_prompt_learner.pt",
-}
-COOP_DEFAULT_FLAGS = ["--wandb"]
-
-FULL_MAPLE_DEFAULTS = {
-    "--model": "ViT-B/16",
-    "--train-dataset": "IWildCam",
-    "--eval-datasets": "IWildCamIDVal,IWildCamID,IWildCamOOD",
-    "--batch-size": "256",
-    "--workers": "4",
-    "--n-ctx": "2",
-    "--ctx-init": "a photo of a",
-    "--epochs": "20",
-    "--lr": "1e-5",
-    "--wd": "0.2",
-    "--lr-scheduler": "cosine",
-    "--warmup-length": "500",
-    "--maple-precision": "amp",
-    "--template": "iwildcam_template",
-    "--val-dataset": "IWildCamVal",
-    "--best-metric": "F1-macro_all",
-    "--maple-prompt-depth": "9",
-    "--wandb-project": "PoorFrogs",
-    "--wandb-run-name": "maple-full-vit-b16-bs256-iwildcamval",
-    "--save": "./checkpoints/maple_full_prompt_learner_vitb16_bs256_iwildcamval.pt",
-}
-FULL_MAPLE_DEFAULT_FLAGS = ["--wandb"]
-
-MAPLE_CBCE_DEFAULTS = {
-    **FULL_MAPLE_DEFAULTS,
-    "--eval-datasets": "IWildCamVal",
-    "--val-dataset": "IWildCamVal",
-    "--wandb-run-name": "a1-maple-cbce-vit-b16-bs256-iwildcamval",
-    "--save": "/kaggle/working/checkpoints/a1_maple_cbce_vitb16_bs256_iwildcamval.pt",
-}
-MAPLE_CBCE_FLAGS = ["--wandb"]
-
-MAPLE_TAU_SWEEP_EVAL_DEFAULTS = {
-    **FULL_MAPLE_DEFAULTS,
-    "--eval-datasets": "IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
-    "--epochs": "0",
-    "--selection-split": "IWildCamVal",
-    "--logit-adjustment-tau-grid": "0,0.25,0.5,0.75,1,1.5,2",
-    "--wandb-run-name": "maple-vanilla-vit-b16-bs256-tau-sweep-iwildcamval",
-    "--load": "/kaggle/input/maple-vanilla-checkpoint/maple_full_prompt_learner_best.pt",
-}
-MAPLE_TAU_SWEEP_EVAL_FLAGS = ["--wandb"]
-
-MAPLE_LORA_DEFAULTS = {
-    **FULL_MAPLE_DEFAULTS,
-    "--maple-lora-rank": "4",
-    "--maple-lora-alpha": "8",
-    "--maple-lora-layers": "last6",
-    "--maple-lora-gamma": "1.0",
-    "--wandb-run-name": "maple-lora-vit-b16-bs256-r4-last6-e20-lr1e-5",
-    "--save": "./checkpoints/maple_lora_vitb16_bs256_r4_last6_e20_lr1e-5.pt",
-}
-MAPLE_LORA_DEFAULT_FLAGS = ["--wandb"]
-
-C1_DEFAULTS = {
-    **MAPLE_LORA_DEFAULTS,
-    "--eval-datasets": "IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
-    "--val-dataset": "IWildCamVal",
-    "--best-metric": "F1-macro_all",
-    "--class-bias-scale-grid": "-2,-1,-0.5,0,0.5,1,2",
-    "--wandb-run-name": "c1-fixed-anchor-kl0p1-iwildcamval",
-    "--save": "/kaggle/working/checkpoints/c1_fixed_anchor_kl0p1_iwildcamval.pt",
-}
-C1_DEFAULT_FLAGS = ["--wandb", "--class-bias-calibration"]
-
-C1_AUTOFT_DEFAULTS = {
-    **C1_DEFAULTS,
-    "--val-dataset": "IWildCamOODVal",
-    "--num-ood-hp-examples": "1000",
-    "--wandb-run-name": "c1-autoft-1k-oodval-vit-b16-bs256",
-    "--save": "/kaggle/working/checkpoints/c1_autoft_1k_oodval_vitb16_bs256.pt",
-}
-C1_AUTOFT_DEFAULT_FLAGS = ["--wandb", "--class-balanced-ood", "--class-bias-calibration"]
-C1_KL_WEIGHT = 0.1
-C1_KL_TEMPERATURE = 1.0
+FLYP_WISE_FINE_ALPHAS = "0.0,0.05,0.1,0.15,0.2,0.3"
+TAIL_AWARE_FLYP_WEIGHT = "0.01"
+TAIL_AWARE_FLYP_SCALE = "50"
 
 FLYP_DEFAULTS = {
     "--model": "ViT-B-16",
@@ -124,15 +30,16 @@ FLYP_DEFAULTS = {
     "--template": "iwildcam_template",
     "--val-dataset": "IWildCamVal",
     "--best-metric": "F1-macro_all",
-    "--drm-weight": "1.0",
+    "--drm-weight": "0",
     "--drm-warmup-epochs": "0",
+    "--tail-proto-weight": TAIL_AWARE_FLYP_WEIGHT,
+    "--tail-proto-scale": TAIL_AWARE_FLYP_SCALE,
     "--wise-alphas": FLYP_WISE_FINE_ALPHAS,
     "--wandb-project": "PoorFrogs",
-    "--wandb-run-name": "flyp-drm-wise-vit-b16-iwildcamval",
-    "--save": "/kaggle/working/checkpoints/flyp_drm_wise_vitb16_iwildcamval.pt",
+    "--wandb-run-name": "tail-aware-flyp-lam0p01-scale50-wise-vitb16-iwildcamval",
+    "--save": "/kaggle/working/checkpoints/tail_aware_flyp_lam0p01_scale50_wise_vitb16_iwildcamval.pt",
 }
 FLYP_DEFAULT_FLAGS = ["--wandb"]
-FLYP_DRM_WEIGHT = 1.0
 
 # ---------------------------------------------------------------------------
 # Kernel overrides (Kaggle compatibility)
@@ -147,11 +54,13 @@ FLYP_DRM_WEIGHT = 1.0
 #   the rest at None (which falls through to env var → CLI arg → built-in
 #   default).
 # ---------------------------------------------------------------------------
-_KERNEL_TRAIN_METHOD = None            # None = env var → CLI arg → "coop"
 _KERNEL_DRM_WEIGHT = None              # None = env var → args.drm_weight
 _KERNEL_WISE_ALPHAS = None             # None = env var → args.wise_alphas
+_KERNEL_TAIL_PROTO_WEIGHT = None
+_KERNEL_TAIL_PROTO_SCALE = None
+_KERNEL_TAIL_PROTO_MAX_BATCHES = None
 _KERNEL_WANDB_DISABLE = False          # True = never call wandb (no API key)
-_KERNEL_WANDB_API_KEY = None           # Set in variant files to embed W&B API key directly
+_KERNEL_WANDB_API_KEY = None
 
 
 def _keep_wandb_flag(default_flags):
@@ -178,16 +87,24 @@ def _keep_wandb_flag(default_flags):
         return [f for f in default_flags if f != "--wandb"]
 
 
-def _mode_from_overrides():
-    return _KERNEL_TRAIN_METHOD
-
-
 def _drm_weight_from_overrides():
     return _KERNEL_DRM_WEIGHT
 
 
 def _wise_alphas_from_overrides():
     return _KERNEL_WISE_ALPHAS
+
+
+def _tail_proto_weight_from_overrides():
+    return _KERNEL_TAIL_PROTO_WEIGHT
+
+
+def _tail_proto_scale_from_overrides():
+    return _KERNEL_TAIL_PROTO_SCALE
+
+
+def _tail_proto_max_batches_from_overrides():
+    return _KERNEL_TAIL_PROTO_MAX_BATCHES
 
 
 def strip_mode_args(argv):
@@ -204,28 +121,6 @@ def strip_mode_args(argv):
             continue
         stripped.append(arg)
     return stripped
-
-
-def parse_mode(argv):
-    override = _mode_from_overrides()
-    if override is not None:
-        return override
-    env_mode = os.environ.get("TRAIN_METHOD")
-    if env_mode is not None:
-        return env_mode
-    try:
-        from kaggle_secrets import UserSecretsClient
-        secret_mode = UserSecretsClient().get_secret("TRAIN_METHOD")
-        if secret_mode is not None:
-            return secret_mode
-    except Exception:
-        pass
-    for index, arg in enumerate(argv):
-        if arg == "--mode" and index + 1 < len(argv):
-            return argv[index + 1]
-        if arg.startswith("--mode="):
-            return arg.split("=", 1)[1]
-    return "coop"
 
 
 def _provided_option_names(argv):
@@ -352,132 +247,6 @@ def prepare_iwildcam_layout(repo_root, kaggle_dataset_path=DEFAULT_KAGGLE_DATASE
     return str(target_root.parent)
 
 
-def build_coop_training_argv(data_location, user_args=None):
-    user_args = user_args or []
-    argv = ["kaggle_main.py"]
-    provided = _provided_option_names([argv[0], *user_args])
-
-    defaults = {**COOP_DEFAULTS, "--data-location": data_location}
-    for name, value in defaults.items():
-        if name not in provided:
-            argv.append(f"{name}={value}")
-
-    for flag in _keep_wandb_flag(COOP_DEFAULT_FLAGS):
-        if flag not in provided and f"--no-{flag[2:]}" not in provided:
-            argv.append(flag)
-
-    argv.extend(user_args)
-    return argv
-
-
-def build_full_maple_training_argv(data_location, user_args=None):
-    user_args = user_args or []
-    argv = ["kaggle_main.py"]
-    provided = _provided_option_names([argv[0], *user_args])
-
-    defaults = {**FULL_MAPLE_DEFAULTS, "--data-location": data_location}
-    for name, value in defaults.items():
-        if name not in provided:
-            argv.append(f"{name}={value}")
-
-    for flag in _keep_wandb_flag(FULL_MAPLE_DEFAULT_FLAGS):
-        if flag not in provided and f"--no-{flag[2:]}" not in provided:
-            argv.append(flag)
-
-    argv.extend(user_args)
-    return argv
-
-
-def build_maple_cbce_training_argv(data_location, user_args=None):
-    user_args = user_args or []
-    argv = ["kaggle_main.py"]
-    provided = _provided_option_names([argv[0], *user_args])
-
-    defaults = {**MAPLE_CBCE_DEFAULTS, "--data-location": data_location}
-    for name, value in defaults.items():
-        if name not in provided:
-            argv.append(f"{name}={value}")
-
-    for flag in _keep_wandb_flag(MAPLE_CBCE_FLAGS):
-        if flag not in provided and f"--no-{flag[2:]}" not in provided:
-            argv.append(flag)
-
-    argv.extend(user_args)
-    return argv
-
-
-def build_maple_tau_sweep_eval_argv(data_location, user_args=None):
-    user_args = user_args or []
-    argv = ["kaggle_main.py"]
-    provided = _provided_option_names([argv[0], *user_args])
-
-    defaults = {**MAPLE_TAU_SWEEP_EVAL_DEFAULTS, "--data-location": data_location}
-    for name, value in defaults.items():
-        if name not in provided:
-            argv.append(f"{name}={value}")
-
-    for flag in _keep_wandb_flag(MAPLE_TAU_SWEEP_EVAL_FLAGS):
-        if flag not in provided and f"--no-{flag[2:]}" not in provided:
-            argv.append(flag)
-
-    argv.extend(user_args)
-    return argv
-
-
-def build_maple_lora_training_argv(data_location, user_args=None):
-    user_args = user_args or []
-    argv = ["kaggle_main.py"]
-    provided = _provided_option_names([argv[0], *user_args])
-
-    defaults = {**MAPLE_LORA_DEFAULTS, "--data-location": data_location}
-    for name, value in defaults.items():
-        if name not in provided:
-            argv.append(f"{name}={value}")
-
-    for flag in _keep_wandb_flag(MAPLE_LORA_DEFAULT_FLAGS):
-        if flag not in provided and f"--no-{flag[2:]}" not in provided:
-            argv.append(flag)
-
-    argv.extend(user_args)
-    return argv
-
-
-def build_c1_autoft_training_argv(data_location, user_args=None):
-    user_args = user_args or []
-    argv = ["kaggle_main.py"]
-    provided = _provided_option_names([argv[0], *user_args])
-
-    defaults = {**C1_AUTOFT_DEFAULTS, "--data-location": data_location}
-    for name, value in defaults.items():
-        if name not in provided:
-            argv.append(f"{name}={value}")
-
-    for flag in _keep_wandb_flag(C1_AUTOFT_DEFAULT_FLAGS):
-        if flag not in provided and f"--no-{flag[2:]}" not in provided:
-            argv.append(flag)
-
-    argv.extend(user_args)
-    return argv
-
-
-def build_c1_training_argv(data_location, user_args=None):
-    user_args = user_args or []
-    argv = ["kaggle_main.py"]
-    provided = _provided_option_names([argv[0], *user_args])
-
-    defaults = {**C1_DEFAULTS, "--data-location": data_location}
-    for name, value in defaults.items():
-        if name not in provided:
-            argv.append(f"{name}={value}")
-
-    for flag in _keep_wandb_flag(C1_DEFAULT_FLAGS):
-        if flag not in provided and f"--no-{flag[2:]}" not in provided:
-            argv.append(flag)
-
-    argv.extend(user_args)
-    return argv
-
-
 def build_flyp_training_argv(data_location, user_args=None):
     user_args = user_args or []
     argv = ["kaggle_main.py"]
@@ -525,22 +294,22 @@ def assert_cloned_repo_supports_runtime_flags(repo_root):
     required_fragments = (
         "--lr-scheduler",
         "--warmup-length",
-        "--maple-lora-gamma",
-        "--class-bias-calibration",
-        "--class-bias-scale-grid",
         "--drm-weight",
         "--drm-warmup-epochs",
         "--wise-alphas",
         "--wise-eval-alpha",
+        "--tail-proto-weight",
+        "--tail-proto-scale",
+        "--tail-proto-max-batches",
         '"amp"',
     )
     missing = [fragment for fragment in required_fragments if fragment not in config_text]
     if missing:
         raise RuntimeError(
-            "The cloned repo is stale and does not support the current Kaggle MaPLe/C1 flags "
+            "The cloned repo is stale and does not support the current Kaggle Tail-Aware FLYP flags "
             f"{missing}. Push the latest PoorFrogs code or set DEFAULT_GITHUB_REPO to a branch/commit "
-            "that includes --maple-precision=amp, --lr-scheduler, --warmup-length, "
-            "--maple-lora-gamma, class-bias calibration, and FLYP DRM/WiSE flags before rerunning."
+            "that includes --maple-precision=amp, --lr-scheduler, FLYP DRM/WiSE flags, "
+            "and prototype flags before rerunning."
         )
 
 
@@ -591,12 +360,6 @@ def main():
     os.chdir(repo_root)
     configure_import_path(repo_root)
 
-    mode = parse_mode(sys.argv)
-    if mode not in ("coop", "full_maple", "maple_cbce", "maple_tau_sweep", "maple_lora", "c1", "c1_autoft", "flyp"):
-        raise ValueError(
-            f"Unknown mode: {mode}. Use --mode=coop, --mode=full_maple, --mode=maple_cbce, --mode=maple_tau_sweep, --mode=maple_lora, --mode=c1, --mode=c1_autoft, or --mode=flyp."
-        )
-
     _ensure_deps()
     _ensure_local_package_installed(repo_root)
     assert_cloned_repo_supports_runtime_flags(repo_root)
@@ -606,84 +369,38 @@ def main():
 
     user_args = strip_mode_args(sys.argv)[1:]
 
-    if mode == "full_maple":
-        sys.argv = build_full_maple_training_argv(data_location, user_args)
-        print("Running Kaggle full MaPLe training with arguments:")
-        print(" ".join(sys.argv[1:]))
-        from src.config import parse_arguments
-        from src.train_maple_full import main as run_maple_full
-        run_maple_full(parse_arguments())
-    elif mode == "maple_cbce":
-        sys.argv = build_maple_cbce_training_argv(data_location, user_args)
-        print("Running Kaggle MaPLe + class-balanced CE training with arguments:")
-        print(" ".join(sys.argv[1:]))
-        from src.config import parse_arguments
-        from src.train_maple_full import main as run_maple_full
-        args = parse_arguments()
-        args.class_balanced_ce = True
-        run_maple_full(args)
-    elif mode == "maple_tau_sweep":
-        sys.argv = build_maple_tau_sweep_eval_argv(data_location, user_args)
-        print("Running Kaggle vanilla MaPLe tau-sweep evaluation with arguments:")
-        print(" ".join(sys.argv[1:]))
-        from src.config import parse_arguments
-        from src.train_maple_full import main as run_maple_full
-        run_maple_full(parse_arguments())
-    elif mode == "maple_lora":
-        sys.argv = build_maple_lora_training_argv(data_location, user_args)
-        print("Running Kaggle MaPLe + LoRA training with arguments:")
-        print(" ".join(sys.argv[1:]))
-        from src.config import parse_arguments
-        from src.train_maple_lora import configure_maple_lora_args
-        from src.train_maple_full import main as run_maple_full
-        run_maple_full(configure_maple_lora_args(parse_arguments()))
-    elif mode == "c1_autoft":
-        sys.argv = build_c1_autoft_training_argv(data_location, user_args)
-        print("Running Kaggle C1 AutoFT-style 1k OODVal MaPLe + LoRA + KL training with arguments:")
-        print(" ".join(sys.argv[1:]))
-        from src.config import parse_arguments
-        from src.train_maple_lora import configure_maple_lora_args
-        from src.train_maple_full import main as run_maple_full
-        args = configure_maple_lora_args(parse_arguments())
-        args.kl_weight = float(os.environ.get("C1_KL_WEIGHT", C1_KL_WEIGHT))
-        args.kl_temperature = float(os.environ.get("C1_KL_TEMPERATURE", C1_KL_TEMPERATURE))
-        run_maple_full(args)
-    elif mode == "c1":
-        sys.argv = build_c1_training_argv(data_location, user_args)
-        print("Running Kaggle C1 MaPLe + LoRA + KL training with arguments:")
-        print(" ".join(sys.argv[1:]))
-        from src.config import parse_arguments
-        from src.train_maple_lora import configure_maple_lora_args
-        from src.train_maple_full import main as run_maple_full
-        args = configure_maple_lora_args(parse_arguments())
-        args.kl_weight = float(os.environ.get("C1_KL_WEIGHT", C1_KL_WEIGHT))
-        args.kl_temperature = float(os.environ.get("C1_KL_TEMPERATURE", C1_KL_TEMPERATURE))
-        run_maple_full(args)
-    elif mode == "flyp":
-        sys.argv = build_flyp_training_argv(data_location, user_args)
-        print("Running Kaggle FLYP + DRM + WiSE training with arguments:")
-        print(" ".join(sys.argv[1:]))
-        from src.config import parse_arguments
-        from src.train_flyp import main as run_flyp
-        args = parse_arguments()
-        drm_override = _drm_weight_from_overrides()
-        if drm_override is not None:
-            args.drm_weight = float(drm_override)
-        else:
-            args.drm_weight = float(os.environ.get("FLYP_DRM_WEIGHT", args.drm_weight))
-        wise_override = _wise_alphas_from_overrides()
-        if wise_override is not None:
-            args.wise_alphas = wise_override
-        else:
-            args.wise_alphas = os.environ.get("FLYP_WISE_ALPHAS", args.wise_alphas)
-        run_flyp(args)
+    sys.argv = build_flyp_training_argv(data_location, user_args)
+    print("Running Kaggle Tail-Aware FLYP + WiSE training with arguments:")
+    print(" ".join(sys.argv[1:]))
+    from src.config import parse_arguments
+    from src.train_flyp import main as run_flyp
+    args = parse_arguments()
+    drm_override = _drm_weight_from_overrides()
+    if drm_override is not None:
+        args.drm_weight = float(drm_override)
     else:
-        sys.argv = build_coop_training_argv(data_location, user_args)
-        print("Running Kaggle CoOp training with arguments:")
-        print(" ".join(sys.argv[1:]))
-        from src.config import parse_arguments
-        from src.train_coop import main as run_coop
-        run_coop(parse_arguments())
+        args.drm_weight = float(os.environ.get("FLYP_DRM_WEIGHT", args.drm_weight))
+    wise_override = _wise_alphas_from_overrides()
+    if wise_override is not None:
+        args.wise_alphas = wise_override
+    else:
+        args.wise_alphas = os.environ.get("FLYP_WISE_ALPHAS", args.wise_alphas)
+    tail_weight_override = _tail_proto_weight_from_overrides()
+    if tail_weight_override is not None:
+        args.tail_proto_weight = float(tail_weight_override)
+    else:
+        args.tail_proto_weight = float(os.environ.get("FLYP_TAIL_PROTO_WEIGHT", args.tail_proto_weight))
+    tail_scale_override = _tail_proto_scale_from_overrides()
+    if tail_scale_override is not None:
+        args.tail_proto_scale = float(tail_scale_override)
+    else:
+        args.tail_proto_scale = float(os.environ.get("FLYP_TAIL_PROTO_SCALE", args.tail_proto_scale))
+    tail_max_batches_override = _tail_proto_max_batches_from_overrides()
+    if tail_max_batches_override is not None:
+        args.tail_proto_max_batches = int(tail_max_batches_override)
+    elif os.environ.get("FLYP_TAIL_PROTO_MAX_BATCHES") is not None:
+        args.tail_proto_max_batches = int(os.environ["FLYP_TAIL_PROTO_MAX_BATCHES"])
+    run_flyp(args)
 
 
 if __name__ == "__main__":

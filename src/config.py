@@ -113,6 +113,13 @@ def parse_arguments():
     parser.add_argument("--drm-warmup-epochs", type=int, default=0, help="Linearly warm up --drm-weight over this many epochs; 0 disables warmup.")
     parser.add_argument("--wise-alphas", type=str, default=None, help="Optional comma-separated WiSE-FT alpha grid; alpha=0 is fine-tuned, alpha=1 is zero-shot init. Omit to disable WiSE selection.")
     parser.add_argument("--wise-eval-alpha", type=float, default=None, help="Optional single WiSE-FT alpha to apply before final FLYP evaluation.")
+    parser.add_argument("--adaptive-bins", type=str, default="0,0.4,0.6,0.8,0.9,1.0", help="Comma-separated confidence bin edges for adaptive WiSE evaluation.")
+    parser.add_argument("--adaptive-min-bin-examples", type=int, default=100, help="Minimum validation examples per confidence bin before selecting a bin-specific WiSE alpha.")
+    parser.add_argument("--cd-path", type=str, default=None, help="Optional class concept-description JSON path for DRM-style evaluation.")
+    parser.add_argument("--cd-beta", type=float, default=0.5, help="DRM-style blend weight: beta * default_prompt_probs + (1 - beta) * concept_description_probs.")
+    parser.add_argument("--tail-proto-weight", type=float, default=0.0, help="Tail-Aware FLYP auxiliary CE weight lambda_tail; 0 disables train-time tail prototypes.")
+    parser.add_argument("--tail-proto-scale", type=float, default=50.0, help="Logit scale for Tail-Aware FLYP class-prototype logits.")
+    parser.add_argument("--tail-proto-max-batches", type=int, default=None, help="Optional cap for prototype-building batches, intended for smoke tests only.")
 
     parsed_args = parser.parse_args()
     parsed_args.device = resolve_device_choice(parsed_args.device)

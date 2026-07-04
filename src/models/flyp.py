@@ -11,6 +11,7 @@ from src.device import optimizer_step
 from src.models.clip_encoder import ImageClassifier
 from src.models.coop import eval_coop_single_dataset
 from src.models.coop import unwrap_model
+from src.models.tail_prototype import tail_prototype_loss
 from src.models.zeroshot import get_zeroshot_classifier
 
 
@@ -20,8 +21,12 @@ class FlypTrainStats:
     loss: float
     clip_loss: float = 0.0
     drm_loss: float = 0.0
+    tail_loss: float = 0.0
     drm_to_clip_ratio: float = 0.0
+    tail_to_clip_ratio: float = 0.0
     drm_effective_weight: float = 0.0
+    tail_proto_weight: float = 0.0
+    tail_proto_scale: float = 0.0
     lr: float | None = None
 
 
@@ -169,6 +174,8 @@ def train_flyp_one_epoch(
     epoch,
     init_state_dict=None,
     drm_weight=0.0,
+    tail_prototypes=None,
+    tail_class_counts=None,
     scheduler=None,
     scaler=None,
 ):
@@ -182,8 +189,13 @@ def train_flyp_one_epoch(
     total_loss = 0.0
     total_clip_loss = 0.0
     total_drm_loss = 0.0
+    total_tail_loss = 0.0
     total_seen = 0
     max_batches = args.max_train_batches
+    tail_weight = float(getattr(args, "tail_proto_weight", 0.0) or 0.0)
+    tail_scale = float(getattr(args, "tail_proto_scale", 50.0))
+    if tail_weight != 0.0 and tail_prototypes is None:
+        raise ValueError("tail_prototypes are required when --tail-proto-weight is non-zero.")
 
     for batch_index, data in enumerate(tqdm(dataloader, desc=f"FLYP train epoch {epoch}")):
         if max_batches is not None and batch_index >= max_batches:
@@ -206,7 +218,18 @@ def train_flyp_one_epoch(
                 drm_loss = compute_drm_loss(model, init_state_dict, drm_effective_weight)
             else:
                 drm_loss = clip_loss.new_zeros(())
-            loss = clip_loss + drm_loss
+            if tail_weight != 0.0:
+                tail_raw_loss = tail_prototype_loss(
+                    image_features,
+                    labels,
+                    tail_prototypes,
+                    tail_scale,
+                    class_counts=tail_class_counts,
+                )
+                tail_loss = float(tail_weight) * tail_raw_loss
+            else:
+                tail_loss = clip_loss.new_zeros(())
+            loss = clip_loss + drm_loss + tail_loss
         if not torch.isfinite(loss):
             raise FloatingPointError(f"FLYP produced non-finite loss at epoch {epoch}, batch {batch_index}")
 
@@ -233,9 +256,10 @@ def train_flyp_one_epoch(
             scheduler.step()
 
         batch_size = images.shape[0]
-        total_loss += (clip_loss.item() + drm_loss.item()) * batch_size
+        total_loss += (clip_loss.item() + drm_loss.item() + tail_loss.item()) * batch_size
         total_clip_loss += clip_loss.item() * batch_size
         total_drm_loss += drm_loss.item() * batch_size
+        total_tail_loss += tail_loss.item() * batch_size
         total_seen += batch_size
 
     if total_seen == 0:
@@ -246,8 +270,12 @@ def train_flyp_one_epoch(
         loss=total_loss / total_seen,
         clip_loss=total_clip_loss / total_seen,
         drm_loss=total_drm_loss / total_seen,
+        tail_loss=total_tail_loss / total_seen,
         drm_to_clip_ratio=total_drm_loss / max(total_clip_loss, 1e-12),
+        tail_to_clip_ratio=total_tail_loss / max(total_clip_loss, 1e-12),
         drm_effective_weight=drm_effective_weight,
+        tail_proto_weight=tail_weight,
+        tail_proto_scale=tail_scale if tail_weight != 0.0 else 0.0,
         lr=current_lr,
     )
 

@@ -55,6 +55,83 @@ class FlypModuleTest(unittest.TestCase):
 
         self.assertLess(class_aware_loss.item(), instance_loss.item())
 
+    def test_tail_prototypes_average_and_normalize_train_features(self):
+        from src.models.tail_prototype import build_class_prototypes_from_loader
+
+        class TinyEncoder(torch.nn.Module):
+            def forward(self, images):
+                return images
+
+        dataloader = [
+            {"images": torch.tensor([[2.0, 0.0], [0.0, 3.0], [0.0, 1.0]]), "labels": torch.tensor([0, 1, 1])}
+        ]
+
+        prototypes, counts = build_class_prototypes_from_loader(
+            TinyEncoder(),
+            dataloader,
+            device="cpu",
+            num_classes=3,
+        )
+
+        self.assertEqual(counts.tolist(), [1, 2, 0])
+        self.assertTrue(torch.allclose(prototypes[0], torch.tensor([1.0, 0.0])))
+        self.assertTrue(torch.allclose(prototypes[1], torch.tensor([0.0, 1.0])))
+        self.assertTrue(torch.equal(prototypes[2], torch.zeros(2)))
+
+    def test_tail_prototype_loss_prefers_matching_class_prototypes(self):
+        from src.models.tail_prototype import tail_prototype_loss
+
+        image_features = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+        prototypes = torch.eye(2)
+        correct = tail_prototype_loss(image_features, torch.tensor([0, 1]), prototypes, prototype_scale=10.0)
+        swapped = tail_prototype_loss(image_features, torch.tensor([1, 0]), prototypes, prototype_scale=10.0)
+
+        self.assertLess(correct.item(), swapped.item())
+
+    def test_train_flyp_one_epoch_adds_tail_prototype_auxiliary_loss(self):
+        from src.models.flyp import train_flyp_one_epoch
+
+        class TinyTokenizer:
+            def __call__(self, captions):
+                return torch.zeros(len(captions), 4, dtype=torch.long)
+
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.eye(2))
+
+            def forward(self, images, text):
+                features = images @ self.weight
+                return features, features, torch.ones(())
+
+        model = TinyModel()
+        batch = {"images": torch.eye(2), "labels": torch.tensor([0, 1])}
+        args = SimpleNamespace(
+            device="cpu",
+            model="ViT-B-16",
+            max_train_batches=1,
+            tail_proto_weight=0.5,
+            tail_proto_scale=10.0,
+        )
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.0)
+
+        with patch("src.models.flyp.open_clip.get_tokenizer", return_value=TinyTokenizer()):
+            stats = train_flyp_one_epoch(
+                model,
+                [batch],
+                optimizer,
+                args,
+                ["frog", "deer"],
+                [lambda c: f"a photo of {c}."],
+                epoch=1,
+                tail_prototypes=torch.eye(2),
+                tail_class_counts=torch.tensor([1, 1]),
+            )
+
+        self.assertGreater(stats.tail_loss, 0.0)
+        self.assertAlmostEqual(stats.loss, stats.clip_loss + stats.tail_loss, places=6)
+        self.assertAlmostEqual(stats.tail_to_clip_ratio, stats.tail_loss / stats.clip_loss, places=6)
+
     def test_train_flyp_one_epoch_honors_max_train_batches(self):
         from src.models.flyp import train_flyp_one_epoch
 
