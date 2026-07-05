@@ -15,6 +15,7 @@ from src.models.clip_encoder import CLIPEncoder
 from src.models.coop import maybe_data_parallel, unwrap_model
 from src.models.flyp import get_cached_flyp_zeroshot_classifier, wise_interpolate_state_dict
 from src.models.logit_adjustment import apply_logit_adjustment, get_metric_for_tau_selection
+from src.models.tail_prototype import apply_tail_class_weights, tail_class_weights
 from src.train_coop import build_eval_dataset, log_wandb_summary
 from src.train_flyp import clone_state_dict, ensure_open_clip_for_flyp
 from src.train_maple_full import init_wandb
@@ -46,6 +47,8 @@ def parse_arguments():
     parser.add_argument("--wise-eval-alpha", type=float, default=None)
     parser.add_argument("--prototype-scale-grid", type=str, default="0,1,2,5,10,20,50,100")
     parser.add_argument("--cache-tau-grid", type=str, default="0,0.25,0.5,0.75,1,1.25,1.5,2")
+    parser.add_argument("--tail-gamma-grid", type=str, default="0")
+    parser.add_argument("--tail-weight-max", type=float, default=5.0)
     parser.add_argument("--cd-path", type=str, default=None, help="Optional DRM concept-description JSON for concept ablations.")
     parser.add_argument("--concept-beta-grid", type=str, default="0,0.25,0.5,0.75,1")
     parser.add_argument("--max-cache-examples-per-class", type=int, default=0)
@@ -201,14 +204,16 @@ def metrics_from_logits(dataset, logits, labels, metadata, args):
     return metrics
 
 
-def build_candidate_predictions(base_logits, prototype_raw_logits, concept_raw_logits, class_priors, row):
+def build_candidate_predictions(base_logits, prototype_raw_logits, concept_raw_logits, class_priors, tail_weights_by_gamma, row):
     head = row["head"]
     if head == "default":
         return base_logits
 
     prototype_scale = float(row.get("prototype_scale", 0.0))
     tau = float(row.get("tau", 0.0))
-    prototype_combo_logits = base_logits + prototype_scale * prototype_raw_logits
+    tail_gamma = float(row.get("tail_gamma", 0.0))
+    weighted_prototype_logits = apply_tail_class_weights(prototype_raw_logits, tail_weights_by_gamma[tail_gamma])
+    prototype_combo_logits = base_logits + prototype_scale * weighted_prototype_logits
     prototype_combo_logits = apply_logit_adjustment(prototype_combo_logits, class_priors, tau)
 
     if head in {"prototype", "prototype_tau"}:
@@ -229,39 +234,61 @@ def build_candidate_predictions(base_logits, prototype_raw_logits, concept_raw_l
     raise ValueError(f"Unsupported candidate head: {head}")
 
 
-def evaluate_candidate(dataset, base_logits, prototype_raw_logits, concept_raw_logits, labels, metadata, args, class_priors, row):
-    predictions = build_candidate_predictions(base_logits, prototype_raw_logits, concept_raw_logits, class_priors, row)
+def evaluate_candidate(dataset, base_logits, prototype_raw_logits, concept_raw_logits, labels, metadata, args, class_priors, tail_weights_by_gamma, row):
+    predictions = build_candidate_predictions(base_logits, prototype_raw_logits, concept_raw_logits, class_priors, tail_weights_by_gamma, row)
     return metrics_from_logits(dataset, predictions, labels, metadata, args)
 
 
-def make_candidate_rows(prototype_scale_grid, tau_grid, concept_beta_grid, include_concept):
-    rows = [{"head": "default", "prototype_scale": 0.0, "tau": 0.0, "concept_beta": None}]
+def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, concept_beta_grid, include_concept):
+    rows = [{"head": "default", "prototype_scale": 0.0, "tau": 0.0, "tail_gamma": 0.0, "concept_beta": None}]
     for scale in prototype_scale_grid:
-        rows.append({"head": "prototype", "prototype_scale": float(scale), "tau": 0.0, "concept_beta": None})
+        for tail_gamma in tail_gamma_grid:
+            rows.append({
+                "head": "prototype",
+                "prototype_scale": float(scale),
+                "tau": 0.0,
+                "tail_gamma": float(tail_gamma),
+                "concept_beta": None,
+            })
     for scale in prototype_scale_grid:
         for tau in tau_grid:
-            rows.append({"head": "prototype_tau", "prototype_scale": float(scale), "tau": float(tau), "concept_beta": None})
+            for tail_gamma in tail_gamma_grid:
+                rows.append({
+                    "head": "prototype_tau",
+                    "prototype_scale": float(scale),
+                    "tau": float(tau),
+                    "tail_gamma": float(tail_gamma),
+                    "concept_beta": None,
+                })
     if include_concept:
         for concept_beta in concept_beta_grid:
-            rows.append({"head": "concept", "prototype_scale": 0.0, "tau": 0.0, "concept_beta": float(concept_beta)})
+            rows.append({
+                "head": "concept",
+                "prototype_scale": 0.0,
+                "tau": 0.0,
+                "tail_gamma": 0.0,
+                "concept_beta": float(concept_beta),
+            })
         for concept_beta in concept_beta_grid:
             for scale in prototype_scale_grid:
                 for tau in tau_grid:
-                    rows.append({
-                        "head": "concept_prototype",
-                        "prototype_scale": float(scale),
-                        "tau": float(tau),
-                        "concept_beta": float(concept_beta),
-                    })
+                    for tail_gamma in tail_gamma_grid:
+                        rows.append({
+                            "head": "concept_prototype",
+                            "prototype_scale": float(scale),
+                            "tau": float(tau),
+                            "tail_gamma": float(tail_gamma),
+                            "concept_beta": float(concept_beta),
+                        })
     return rows
 
 
-def select_adapter_params(dataset, base_logits, prototype_raw_logits, concept_raw_logits, labels, metadata, args, prototype_scale_grid, tau_grid, concept_beta_grid, class_priors):
+def select_adapter_params(dataset, base_logits, prototype_raw_logits, concept_raw_logits, labels, metadata, args, prototype_scale_grid, tau_grid, tail_gamma_grid, concept_beta_grid, class_priors, tail_weights_by_gamma):
     rows = []
     best_by_head = {}
-    candidate_rows = make_candidate_rows(prototype_scale_grid, tau_grid, concept_beta_grid, concept_raw_logits is not None)
+    candidate_rows = make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, concept_beta_grid, concept_raw_logits is not None)
     for candidate in candidate_rows:
-        results = evaluate_candidate(dataset, base_logits, prototype_raw_logits, concept_raw_logits, labels, metadata, args, class_priors, candidate)
+        results = evaluate_candidate(dataset, base_logits, prototype_raw_logits, concept_raw_logits, labels, metadata, args, class_priors, tail_weights_by_gamma, candidate)
         row = {
             **candidate,
             "score": get_metric_for_tau_selection(results, args.best_metric),
@@ -280,20 +307,20 @@ def select_adapter_params(dataset, base_logits, prototype_raw_logits, concept_ra
 def print_selection(rows, best_by_head, limit=16):
     ranked = sorted(rows, key=lambda row: row["score"], reverse=True)[:limit]
     print("\n=== Tail Cache Ablation Selection on Validation ===")
-    print("| Rank | Head              | Scale | Tau  | Concept beta | Score  | Top-1  | F1-macro |")
-    print("| ---- | ----------------- | ----- | ---- | ------------ | ------ | ------ | -------- |")
+    print("| Rank | Head              | Scale | Tau  | Tail gamma | Concept beta | Score  | Top-1  | F1-macro |")
+    print("| ---- | ----------------- | ----- | ---- | ---------- | ------------ | ------ | ------ | -------- |")
     for rank, row in enumerate(ranked, start=1):
         top1 = f"{row['top1'] * 100:.2f}%"
         f1 = "N/A" if row["F1-macro_all"] is None else f"{row['F1-macro_all'] * 100:.2f}%"
         concept_beta = "N/A" if row["concept_beta"] is None else f"{row['concept_beta']:g}"
         print(
             f"| {rank:<4} | {row['head']:<17} | {row['prototype_scale']:<5g} | {row['tau']:<4g} | "
-            f"{concept_beta:<12} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |"
+            f"{row['tail_gamma']:<10g} | {concept_beta:<12} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |"
         )
 
     print("\n=== Best by Ablation Head ===")
-    print("| Head              | Scale | Tau  | Concept beta | Score  | Top-1  | F1-macro |")
-    print("| ----------------- | ----- | ---- | ------------ | ------ | ------ | -------- |")
+    print("| Head              | Scale | Tau  | Tail gamma | Concept beta | Score  | Top-1  | F1-macro |")
+    print("| ----------------- | ----- | ---- | ---------- | ------------ | ------ | ------ | -------- |")
     for head in ("default", "prototype", "prototype_tau", "concept", "concept_prototype"):
         row = best_by_head.get(head)
         if row is None:
@@ -303,7 +330,7 @@ def print_selection(rows, best_by_head, limit=16):
         concept_beta = "N/A" if row["concept_beta"] is None else f"{row['concept_beta']:g}"
         print(
             f"| {head:<17} | {row['prototype_scale']:<5g} | {row['tau']:<4g} | "
-            f"{concept_beta:<12} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |"
+            f"{row['tail_gamma']:<10g} | {concept_beta:<12} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |"
         )
 
 
@@ -359,7 +386,12 @@ def main(args):
         _, concept_head = build_drm_classifiers(concept_args, encoder.model)
     prototype_scale_grid = parse_float_grid(args.prototype_scale_grid)
     tau_grid = parse_float_grid(args.cache_tau_grid)
+    tail_gamma_grid = parse_float_grid(args.tail_gamma_grid)
     concept_beta_grid = parse_float_grid(args.concept_beta_grid)
+    tail_weights_by_gamma = {
+        float(gamma): tail_class_weights(counts, gamma, max_weight=args.tail_weight_max)
+        for gamma in tail_gamma_grid
+    }
 
     val_dataset = build_eval_dataset(args.val_dataset, encoder, args, allow_ood_hp_subsample=True)
     val_features = extract_features(model, val_dataset.test_loader, args, f"{args.val_dataset} features")
@@ -376,8 +408,10 @@ def main(args):
         args,
         prototype_scale_grid,
         tau_grid,
+        tail_gamma_grid,
         concept_beta_grid,
         class_priors,
+        tail_weights_by_gamma,
     )
     print_selection(selection_rows, best_by_head)
 
@@ -402,6 +436,7 @@ def main(args):
                 features["metadata"],
                 args,
                 class_priors,
+                tail_weights_by_gamma,
                 best,
             )
             top1 = results.get("top1")
@@ -416,6 +451,7 @@ def main(args):
                     f"tail_cache/{dataset_name}/{head_name}/f1_macro": f1_macro,
                     f"tail_cache/{head_name}/prototype_scale": best["prototype_scale"],
                     "tail_cache/best_tau": best["tau"],
+                    f"tail_cache/{head_name}/tail_gamma": best["tail_gamma"],
                     f"tail_cache/{head_name}/concept_beta": best["concept_beta"],
                 })
 

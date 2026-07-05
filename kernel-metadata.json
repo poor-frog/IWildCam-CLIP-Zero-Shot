@@ -1,6 +1,6 @@
 {
   "id": "thanhquang71/poorfrogs-dg-clip-iwildcam",
-  "title": "PoorFrogs DG CLIP IWildCam",
+  "title": "PoorFrogs Tail Weighted TPA IWildCam",
   "code_file": "kaggle_eval_tail_prototype_adapter.py",
   "language": "python",
   "kernel_type": "script",

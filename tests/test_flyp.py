@@ -88,6 +88,34 @@ class FlypModuleTest(unittest.TestCase):
 
         self.assertLess(correct.item(), swapped.item())
 
+    def test_tail_class_weights_emphasize_rare_classes(self):
+        from src.models.tail_prototype import tail_class_weights
+
+        weights = tail_class_weights(torch.tensor([100, 25, 1, 0]), gamma=0.5, max_weight=5.0)
+
+        self.assertGreater(weights[2].item(), weights[1].item())
+        self.assertGreater(weights[1].item(), weights[0].item())
+        self.assertEqual(weights[3].item(), 0.0)
+        self.assertAlmostEqual(weights[:3].mean().item(), 1.0, places=6)
+
+    def test_tail_class_weights_gamma_zero_keeps_present_classes_unweighted(self):
+        from src.models.tail_prototype import tail_class_weights
+
+        weights = tail_class_weights(torch.tensor([100, 25, 1, 0]), gamma=0.0)
+
+        self.assertEqual(weights.tolist(), [1.0, 1.0, 1.0, 0.0])
+
+    def test_apply_tail_class_weights_preserves_missing_class_mask(self):
+        from src.models.tail_prototype import apply_tail_class_weights
+
+        logits = torch.tensor([[2.0, torch.finfo(torch.float32).min]])
+        weights = torch.tensor([1.5, 0.0])
+
+        weighted = apply_tail_class_weights(logits, weights)
+
+        self.assertEqual(weighted[0, 0].item(), 3.0)
+        self.assertEqual(weighted[0, 1].item(), torch.finfo(torch.float32).min)
+
     def test_train_flyp_one_epoch_adds_tail_prototype_auxiliary_loss(self):
         from src.models.flyp import train_flyp_one_epoch
 

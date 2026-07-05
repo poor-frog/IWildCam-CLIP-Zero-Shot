@@ -65,6 +65,30 @@ def tail_prototype_logits(image_features, class_prototypes, prototype_scale):
     return float(prototype_scale) * image_features @ class_prototypes.t()
 
 
+def tail_class_weights(class_counts, gamma, max_weight=5.0):
+    counts = class_counts.float()
+    present = counts > 0
+    if not present.any():
+        raise ValueError("Cannot build tail weights without present classes.")
+
+    weights = torch.zeros_like(counts)
+    if float(gamma) == 0.0:
+        weights[present] = 1.0
+        return weights
+
+    max_count = counts[present].max().clamp_min(1.0)
+    raw_weights = (counts[present].clamp_min(1.0) / max_count).pow(-float(gamma))
+    raw_weights = raw_weights.clamp(max=float(max_weight))
+    weights[present] = raw_weights / raw_weights.mean().clamp_min(1e-12)
+    return weights
+
+
+def apply_tail_class_weights(logits, class_weights):
+    weights = class_weights.to(device=logits.device, dtype=logits.dtype)
+    weights = torch.where(weights > 0, weights, torch.ones_like(weights))
+    return logits * weights.unsqueeze(0)
+
+
 def tail_prototype_loss(image_features, labels, class_prototypes, prototype_scale, class_counts=None):
     labels = labels.to(device=image_features.device, dtype=torch.long)
     if class_counts is not None:

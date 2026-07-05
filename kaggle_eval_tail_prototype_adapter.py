@@ -12,6 +12,8 @@ DEFAULT_KAGGLE_DATASET_CANDIDATES = [
 DEFAULT_GITHUB_REPO = "https://github.com/poor-frog/IWildCam-CLIP-Zero-Shot.git"
 DEFAULT_KAGGLE_WORKING_REPO = Path("/kaggle/working/IWildCam-CLIP-Zero-Shot")
 CHECKPOINT_NAME = "flyp_nodrm_wise_vitb16_iwildcamval_best.pt"
+TAIL_GAMMA_GRID = os.environ.get("FLYP_TPA_TAIL_GAMMA_GRID", "0,0.25,0.5,1.0")
+TAIL_WEIGHT_MAX = os.environ.get("FLYP_TPA_TAIL_WEIGHT_MAX", "5.0")
 
 
 def is_project_root(path):
@@ -226,6 +228,8 @@ def main():
         f"--load={checkpoint}",
         "--prototype-scale-grid=50",
         "--cache-tau-grid=0",
+        f"--tail-gamma-grid={TAIL_GAMMA_GRID}",
+        f"--tail-weight-max={TAIL_WEIGHT_MAX}",
         "--max-cache-examples-per-class=0",
         "--batch-size=256",
         "--workers=2",
@@ -235,7 +239,7 @@ def main():
         command.extend([
             "--wandb",
             "--wandb-project=PoorFrogs",
-            "--wandb-run-name=flyp-nodrm-wise-tail-prototype-adapter-scale50-tau0",
+            "--wandb-run-name=flyp-tail-weighted-prototype-adapter-gamma-grid-vitb16-iwildcamval",
         ])
     else:
         command.append("--no-wandb")
