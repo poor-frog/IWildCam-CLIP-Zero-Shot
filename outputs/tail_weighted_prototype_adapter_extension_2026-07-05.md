@@ -99,3 +99,60 @@ IWildCamOOD F1 >= 37.0
 
 If no `tail_gamma > 0` candidate wins on `IWildCamVal`, keep the original
 validation-time Tail Prototype Adapter as the main method.
+
+## Kaggle Result
+
+Kaggle kernel:
+
+```text
+thanhquang71/poorfrogs-tail-weighted-tpa-iwildcam
+```
+
+Validation selection on `IWildCamVal`:
+
+| Rank | Head | Scale | Tau | Tail gamma | Top-1 | F1-macro |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | prototype | 50 | 0 | 0 | 57.22 | 39.60 |
+| 2 | prototype_tau | 50 | 0 | 0 | 57.22 | 39.60 |
+| 3 | default | 0 | 0 | 0 | 54.31 | 36.94 |
+| 4 | prototype | 50 | 0 | 1.0 | 43.44 | 34.70 |
+| 5 | prototype_tau | 50 | 0 | 1.0 | 43.44 | 34.70 |
+| 6 | prototype | 50 | 0 | 0.5 | 36.74 | 32.98 |
+| 7 | prototype_tau | 50 | 0 | 0.5 | 36.74 | 32.98 |
+| 8 | prototype | 50 | 0 | 0.25 | 14.36 | 21.01 |
+| 9 | prototype_tau | 50 | 0 | 0.25 | 14.36 | 21.01 |
+
+Final metrics for the validation-selected head:
+
+| Split | Default Top-1 | Default F1 | TPA Top-1 | TPA F1 |
+| --- | ---: | ---: | ---: | ---: |
+| IWildCamIDVal | 76.55 | 44.89 | 76.25 | 48.09 |
+| IWildCamVal | 54.31 | 36.94 | 57.22 | 39.60 |
+| IWildCamID | 70.15 | 47.65 | 70.70 | 51.41 |
+| IWildCamOOD | 70.12 | 31.74 | 72.20 | 36.11 |
+
+## Decision
+
+Do not promote Tail-Weighted Prototype Adapter.
+
+The best validation-selected setting is:
+
+```text
+tail_gamma = 0
+```
+
+That is exactly the original **FLYP + Tail Prototype Adapter** baseline. All
+`tail_gamma > 0` settings underperform on the validation split, with
+`tail_gamma=0.25` collapsing severely.
+
+Record this as a negative ablation:
+
+```text
+Tail-weighted residual by inverse class frequency: failed.
+Main method remains FLYP + Tail Prototype Adapter.
+Best observed Kaggle IWildCamOOD F1 = 36.11.
+```
+
+Next extension should avoid direct class-frequency multiplication. Prefer a
+sample-level gate, such as confidence-gated or adaptive-alpha prototype
+residuals selected only on `IWildCamVal`.

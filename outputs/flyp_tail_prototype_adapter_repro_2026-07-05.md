@@ -137,6 +137,25 @@ local IWildCamOOD F1 = 35.99
 Kaggle IWildCamOOD F1 = 35.78
 ```
 
+## Kaggle Rerun During Tail-Weighted Ablation
+
+The Tail-Weighted Prototype Adapter sweep selected `tail_gamma=0`, which is
+identical to the original TPA baseline. This rerun produced a slightly stronger
+OOD result:
+
+| Split | Head | Top-1 | F1-macro |
+| --- | --- | ---: | ---: |
+| IWildCamIDVal | prototype | 76.25 | 48.09 |
+| IWildCamVal | prototype | 57.22 | 39.60 |
+| IWildCamID | prototype | 70.70 | 51.41 |
+| IWildCamOOD | prototype | 72.20 | 36.11 |
+
+Best observed Kaggle result:
+
+```text
+IWildCamOOD F1 = 36.11
+```
+
 ## Decision
 
 Promote this as the current ViT-B/16 baseline:
@@ -156,6 +175,7 @@ Observed:
 ```text
 Local IWildCamOOD F1 = 35.99
 Kaggle IWildCamOOD F1 = 35.78
+Best observed Kaggle IWildCamOOD F1 = 36.11
 ```
 
 ## Reproducibility Status
