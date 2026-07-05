@@ -1,7 +1,7 @@
 {
-  "id": "klinh1912/poorfrogs-dg-clip-iwildcam",
+  "id": "thanhquang71/poorfrogs-dg-clip-iwildcam",
   "title": "PoorFrogs DG CLIP IWildCam",
-  "code_file": "kaggle_main.py",
+  "code_file": "kaggle_eval_tail_prototype_adapter.py",
   "language": "python",
   "kernel_type": "script",
   "is_private": true,
@@ -10,7 +10,8 @@
   "enable_internet": true,
   "machine_shape": "NvidiaTeslaT4",
   "dataset_sources": [
-    "thanhquang71/iwildcam-v2-0-2020-wilds-dataset"
+    "thanhquang71/iwildcam-v2-0-2020-wilds-dataset",
+    "thanhquang71/flyp-nodrm-wise-vitb16-iwildcamval-checkpoint"
   ],
   "competition_sources": [],
   "kernel_sources": [],

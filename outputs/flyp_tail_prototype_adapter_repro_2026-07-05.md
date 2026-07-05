@@ -96,6 +96,47 @@ Selected on `IWildCamVal`.
 | IWildCamID | +3.66 | +0.59 |
 | IWildCamOOD | +4.25 | +2.26 |
 
+## Kaggle Reproduction
+
+Kaggle kernel:
+
+```text
+thanhquang71/poorfrogs-dg-clip-iwildcam
+```
+
+Kaggle command surface:
+
+```text
+kaggle_eval_tail_prototype_adapter.py
+```
+
+Attached datasets:
+
+```text
+thanhquang71/iwildcam-v2-0-2020-wilds-dataset
+thanhquang71/flyp-nodrm-wise-vitb16-iwildcamval-checkpoint
+```
+
+Kaggle result:
+
+| Split | Head | Top-1 | F1-macro |
+| --- | --- | ---: | ---: |
+| IWildCamIDVal | default | 76.55 | 44.89 |
+| IWildCamIDVal | prototype | 76.22 | 47.79 |
+| IWildCamVal | default | 54.31 | 36.94 |
+| IWildCamVal | prototype | 57.28 | 39.61 |
+| IWildCamID | default | 70.15 | 47.65 |
+| IWildCamID | prototype | 70.74 | 51.37 |
+| IWildCamOOD | default | 70.12 | 31.74 |
+| IWildCamOOD | prototype | 72.19 | 35.78 |
+
+Kaggle OOD F1 is within `0.21` points of the local result:
+
+```text
+local IWildCamOOD F1 = 35.99
+Kaggle IWildCamOOD F1 = 35.78
+```
+
 ## Decision
 
 Promote this as the current ViT-B/16 baseline:
@@ -113,11 +154,12 @@ IWildCamOOD F1 >= 35.5
 Observed:
 
 ```text
-IWildCamOOD F1 = 35.99
+Local IWildCamOOD F1 = 35.99
+Kaggle IWildCamOOD F1 = 35.78
 ```
 
-## Next Gate
+## Reproducibility Status
 
-Run the same script on Kaggle with the same checkpoint attached as an input
-artifact. The Kaggle result should be considered reproducible if OOD F1 remains
-at or above `35.5`.
+The baseline is reproducible across local and Kaggle runs under the predefined
+acceptance threshold. Use the Kaggle number for environment-clean reporting and
+the local number as the original development run.
