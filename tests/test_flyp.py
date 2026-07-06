@@ -116,6 +116,41 @@ class FlypModuleTest(unittest.TestCase):
         self.assertEqual(weighted[0, 0].item(), 3.0)
         self.assertEqual(weighted[0, 1].item(), torch.finfo(torch.float32).min)
 
+    def test_entropy_confidence_gate_boosts_uncertain_samples(self):
+        from src.eval_tail_cache import confidence_gate
+
+        confident = torch.tensor([[10.0, 0.0, -1.0]])
+        uncertain = torch.tensor([[0.1, 0.0, -0.1]])
+        gate = confidence_gate(torch.cat([confident, uncertain]), mode="entropy", strength=0.5)
+
+        self.assertEqual(tuple(gate.shape), (2, 1))
+        self.assertGreater(gate[1, 0].item(), gate[0, 0].item())
+        self.assertLess(gate[0, 0].item(), 1.0)
+        self.assertGreater(gate[1, 0].item(), 1.0)
+        self.assertGreaterEqual(gate.min().item(), 0.75)
+        self.assertLessEqual(gate.max().item(), 1.25)
+
+    def test_margin_confidence_gate_boosts_small_margin_samples(self):
+        from src.eval_tail_cache import confidence_gate
+
+        confident = torch.tensor([[10.0, 0.0, -1.0]])
+        uncertain = torch.tensor([[1.0, 0.9, -1.0]])
+        gate = confidence_gate(torch.cat([confident, uncertain]), mode="margin", strength=1.0)
+
+        self.assertGreater(gate[1, 0].item(), gate[0, 0].item())
+        self.assertLess(gate[0, 0].item(), 1.0)
+        self.assertGreater(gate[1, 0].item(), 1.0)
+        self.assertGreaterEqual(gate.min().item(), 0.5)
+        self.assertLessEqual(gate.max().item(), 1.5)
+
+    def test_confidence_gate_strength_zero_matches_baseline(self):
+        from src.eval_tail_cache import confidence_gate
+
+        logits = torch.tensor([[10.0, 0.0, -1.0], [0.1, 0.0, -0.1]])
+
+        self.assertTrue(torch.equal(confidence_gate(logits, mode="entropy", strength=0.0), torch.ones(2, 1)))
+        self.assertTrue(torch.equal(confidence_gate(logits, mode="margin", strength=0.0), torch.ones(2, 1)))
+
     def test_train_flyp_one_epoch_adds_tail_prototype_auxiliary_loss(self):
         from src.models.flyp import train_flyp_one_epoch
 

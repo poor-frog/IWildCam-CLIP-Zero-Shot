@@ -1,6 +1,6 @@
 {
-  "id": "thanhquang71/poorfrogs-tail-weighted-tpa-iwildcam",
-  "title": "PoorFrogs Tail Weighted TPA IWildCam",
+  "id": "thanhquang71/poorfrogs-confidence-gated-tpa-iwildcam",
+  "title": "PoorFrogs Confidence Gated TPA IWildCam",
   "code_file": "kaggle_eval_tail_prototype_adapter.py",
   "language": "python",
   "kernel_type": "script",

@@ -49,6 +49,8 @@ def parse_arguments():
     parser.add_argument("--cache-tau-grid", type=str, default="0,0.25,0.5,0.75,1,1.25,1.5,2")
     parser.add_argument("--tail-gamma-grid", type=str, default="0")
     parser.add_argument("--tail-weight-max", type=float, default=5.0)
+    parser.add_argument("--gate-mode-grid", type=str, default="none")
+    parser.add_argument("--gate-strength-grid", type=str, default="0")
     parser.add_argument("--cd-path", type=str, default=None, help="Optional DRM concept-description JSON for concept ablations.")
     parser.add_argument("--concept-beta-grid", type=str, default="0,0.25,0.5,0.75,1")
     parser.add_argument("--max-cache-examples-per-class", type=int, default=0)
@@ -204,6 +206,23 @@ def metrics_from_logits(dataset, logits, labels, metadata, args):
     return metrics
 
 
+def confidence_gate(base_logits, mode, strength):
+    strength = float(strength)
+    if mode == "none" or strength == 0.0:
+        return torch.ones(base_logits.shape[0], 1, dtype=base_logits.dtype)
+    probs = F.softmax(base_logits, dim=1)
+    if mode == "entropy":
+        entropy = -(probs * probs.clamp_min(1e-12).log()).sum(dim=1)
+        max_entropy = torch.log(torch.tensor(base_logits.shape[1], device=base_logits.device, dtype=base_logits.dtype))
+        uncertainty = entropy / max_entropy.clamp_min(1e-12)
+    elif mode == "margin":
+        top2 = probs.topk(k=2, dim=1).values
+        uncertainty = 1.0 - (top2[:, 0] - top2[:, 1])
+    else:
+        raise ValueError(f"Unsupported gate mode: {mode}")
+    return (1.0 + strength * (uncertainty.clamp(0.0, 1.0) - 0.5)).clamp_min(0.0).unsqueeze(1)
+
+
 def build_candidate_predictions(base_logits, prototype_raw_logits, concept_raw_logits, class_priors, tail_weights_by_gamma, row):
     head = row["head"]
     if head == "default":
@@ -212,8 +231,11 @@ def build_candidate_predictions(base_logits, prototype_raw_logits, concept_raw_l
     prototype_scale = float(row.get("prototype_scale", 0.0))
     tau = float(row.get("tau", 0.0))
     tail_gamma = float(row.get("tail_gamma", 0.0))
+    gate_mode = row.get("gate_mode", "none")
+    gate_strength = float(row.get("gate_strength", 0.0))
     weighted_prototype_logits = apply_tail_class_weights(prototype_raw_logits, tail_weights_by_gamma[tail_gamma])
-    prototype_combo_logits = base_logits + prototype_scale * weighted_prototype_logits
+    gate = confidence_gate(base_logits, gate_mode, gate_strength)
+    prototype_combo_logits = base_logits + prototype_scale * gate * weighted_prototype_logits
     prototype_combo_logits = apply_logit_adjustment(prototype_combo_logits, class_priors, tau)
 
     if head in {"prototype", "prototype_tau"}:
@@ -239,27 +261,43 @@ def evaluate_candidate(dataset, base_logits, prototype_raw_logits, concept_raw_l
     return metrics_from_logits(dataset, predictions, labels, metadata, args)
 
 
-def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, concept_beta_grid, include_concept):
-    rows = [{"head": "default", "prototype_scale": 0.0, "tau": 0.0, "tail_gamma": 0.0, "concept_beta": None}]
+def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, concept_beta_grid, include_concept):
+    rows = [{
+        "head": "default",
+        "prototype_scale": 0.0,
+        "tau": 0.0,
+        "tail_gamma": 0.0,
+        "gate_mode": "none",
+        "gate_strength": 0.0,
+        "concept_beta": None,
+    }]
     for scale in prototype_scale_grid:
         for tail_gamma in tail_gamma_grid:
-            rows.append({
-                "head": "prototype",
-                "prototype_scale": float(scale),
-                "tau": 0.0,
-                "tail_gamma": float(tail_gamma),
-                "concept_beta": None,
-            })
+            for gate_mode in gate_mode_grid:
+                for gate_strength in gate_strength_grid:
+                    rows.append({
+                        "head": "prototype",
+                        "prototype_scale": float(scale),
+                        "tau": 0.0,
+                        "tail_gamma": float(tail_gamma),
+                        "gate_mode": gate_mode,
+                        "gate_strength": float(gate_strength),
+                        "concept_beta": None,
+                    })
     for scale in prototype_scale_grid:
         for tau in tau_grid:
             for tail_gamma in tail_gamma_grid:
-                rows.append({
-                    "head": "prototype_tau",
-                    "prototype_scale": float(scale),
-                    "tau": float(tau),
-                    "tail_gamma": float(tail_gamma),
-                    "concept_beta": None,
-                })
+                for gate_mode in gate_mode_grid:
+                    for gate_strength in gate_strength_grid:
+                        rows.append({
+                            "head": "prototype_tau",
+                            "prototype_scale": float(scale),
+                            "tau": float(tau),
+                            "tail_gamma": float(tail_gamma),
+                            "gate_mode": gate_mode,
+                            "gate_strength": float(gate_strength),
+                            "concept_beta": None,
+                        })
     if include_concept:
         for concept_beta in concept_beta_grid:
             rows.append({
@@ -267,26 +305,40 @@ def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, concept
                 "prototype_scale": 0.0,
                 "tau": 0.0,
                 "tail_gamma": 0.0,
+                "gate_mode": "none",
+                "gate_strength": 0.0,
                 "concept_beta": float(concept_beta),
             })
         for concept_beta in concept_beta_grid:
             for scale in prototype_scale_grid:
                 for tau in tau_grid:
                     for tail_gamma in tail_gamma_grid:
-                        rows.append({
-                            "head": "concept_prototype",
-                            "prototype_scale": float(scale),
-                            "tau": float(tau),
-                            "tail_gamma": float(tail_gamma),
-                            "concept_beta": float(concept_beta),
-                        })
+                        for gate_mode in gate_mode_grid:
+                            for gate_strength in gate_strength_grid:
+                                rows.append({
+                                    "head": "concept_prototype",
+                                    "prototype_scale": float(scale),
+                                    "tau": float(tau),
+                                    "tail_gamma": float(tail_gamma),
+                                    "gate_mode": gate_mode,
+                                    "gate_strength": float(gate_strength),
+                                    "concept_beta": float(concept_beta),
+                                })
     return rows
 
 
-def select_adapter_params(dataset, base_logits, prototype_raw_logits, concept_raw_logits, labels, metadata, args, prototype_scale_grid, tau_grid, tail_gamma_grid, concept_beta_grid, class_priors, tail_weights_by_gamma):
+def select_adapter_params(dataset, base_logits, prototype_raw_logits, concept_raw_logits, labels, metadata, args, prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, concept_beta_grid, class_priors, tail_weights_by_gamma):
     rows = []
     best_by_head = {}
-    candidate_rows = make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, concept_beta_grid, concept_raw_logits is not None)
+    candidate_rows = make_candidate_rows(
+        prototype_scale_grid,
+        tau_grid,
+        tail_gamma_grid,
+        gate_mode_grid,
+        gate_strength_grid,
+        concept_beta_grid,
+        concept_raw_logits is not None,
+    )
     for candidate in candidate_rows:
         results = evaluate_candidate(dataset, base_logits, prototype_raw_logits, concept_raw_logits, labels, metadata, args, class_priors, tail_weights_by_gamma, candidate)
         row = {
@@ -307,20 +359,21 @@ def select_adapter_params(dataset, base_logits, prototype_raw_logits, concept_ra
 def print_selection(rows, best_by_head, limit=16):
     ranked = sorted(rows, key=lambda row: row["score"], reverse=True)[:limit]
     print("\n=== Tail Cache Ablation Selection on Validation ===")
-    print("| Rank | Head              | Scale | Tau  | Tail gamma | Concept beta | Score  | Top-1  | F1-macro |")
-    print("| ---- | ----------------- | ----- | ---- | ---------- | ------------ | ------ | ------ | -------- |")
+    print("| Rank | Head              | Scale | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
+    print("| ---- | ----------------- | ----- | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
     for rank, row in enumerate(ranked, start=1):
         top1 = f"{row['top1'] * 100:.2f}%"
         f1 = "N/A" if row["F1-macro_all"] is None else f"{row['F1-macro_all'] * 100:.2f}%"
         concept_beta = "N/A" if row["concept_beta"] is None else f"{row['concept_beta']:g}"
         print(
             f"| {rank:<4} | {row['head']:<17} | {row['prototype_scale']:<5g} | {row['tau']:<4g} | "
-            f"{row['tail_gamma']:<10g} | {concept_beta:<12} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |"
+            f"{row['tail_gamma']:<10g} | {row['gate_mode']:<8} | {row['gate_strength']:<8g} | "
+            f"{concept_beta:<12} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |"
         )
 
     print("\n=== Best by Ablation Head ===")
-    print("| Head              | Scale | Tau  | Tail gamma | Concept beta | Score  | Top-1  | F1-macro |")
-    print("| ----------------- | ----- | ---- | ---------- | ------------ | ------ | ------ | -------- |")
+    print("| Head              | Scale | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
+    print("| ----------------- | ----- | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
     for head in ("default", "prototype", "prototype_tau", "concept", "concept_prototype"):
         row = best_by_head.get(head)
         if row is None:
@@ -330,7 +383,8 @@ def print_selection(rows, best_by_head, limit=16):
         concept_beta = "N/A" if row["concept_beta"] is None else f"{row['concept_beta']:g}"
         print(
             f"| {head:<17} | {row['prototype_scale']:<5g} | {row['tau']:<4g} | "
-            f"{row['tail_gamma']:<10g} | {concept_beta:<12} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |"
+            f"{row['tail_gamma']:<10g} | {row['gate_mode']:<8} | {row['gate_strength']:<8g} | "
+            f"{concept_beta:<12} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |"
         )
 
 
@@ -387,6 +441,8 @@ def main(args):
     prototype_scale_grid = parse_float_grid(args.prototype_scale_grid)
     tau_grid = parse_float_grid(args.cache_tau_grid)
     tail_gamma_grid = parse_float_grid(args.tail_gamma_grid)
+    gate_mode_grid = [item.strip() for item in args.gate_mode_grid.split(",") if item.strip()]
+    gate_strength_grid = parse_float_grid(args.gate_strength_grid)
     concept_beta_grid = parse_float_grid(args.concept_beta_grid)
     tail_weights_by_gamma = {
         float(gamma): tail_class_weights(counts, gamma, max_weight=args.tail_weight_max)
@@ -409,6 +465,8 @@ def main(args):
         prototype_scale_grid,
         tau_grid,
         tail_gamma_grid,
+        gate_mode_grid,
+        gate_strength_grid,
         concept_beta_grid,
         class_priors,
         tail_weights_by_gamma,
@@ -452,6 +510,7 @@ def main(args):
                     f"tail_cache/{head_name}/prototype_scale": best["prototype_scale"],
                     "tail_cache/best_tau": best["tau"],
                     f"tail_cache/{head_name}/tail_gamma": best["tail_gamma"],
+                    f"tail_cache/{head_name}/gate_strength": best["gate_strength"],
                     f"tail_cache/{head_name}/concept_beta": best["concept_beta"],
                 })
 
