@@ -153,6 +153,7 @@ Main method remains FLYP + Tail Prototype Adapter.
 Best observed Kaggle IWildCamOOD F1 = 36.11.
 ```
 
-Next extension should avoid direct class-frequency multiplication. Prefer a
-sample-level gate, such as confidence-gated or adaptive-alpha prototype
-residuals selected only on `IWildCamVal`.
+The next confidence-gated validation-time extension was also neutral, so stop
+adding inference-time adapter variants for now. Move to train-time
+**Tail-Aware FLYP** with a frozen prototype auxiliary objective selected only on
+`IWildCamVal`.

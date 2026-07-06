@@ -61,31 +61,44 @@ _KERNEL_TAIL_PROTO_SCALE = None
 _KERNEL_TAIL_PROTO_MAX_BATCHES = None
 _KERNEL_WANDB_DISABLE = False          # True = never call wandb (no API key)
 _KERNEL_WANDB_API_KEY = None
+WANDB_SECRET_NAMES = ("WANDB_API_KEY", "wandb-api-key", "wandb_api_key", "WANDB-API-KEY")
 
 
 def _keep_wandb_flag(default_flags):
-    """Return flags with --wandb stripped when the API key is unavailable."""
-    if _KERNEL_WANDB_DISABLE:
-        return [f for f in default_flags if f != "--wandb"]
-    if os.environ.get("WANDB_API_KEY"):
+    if _configure_wandb_from_kaggle_secret():
         return default_flags
-    # env var missing – check embedded override, then Kaggle secrets
+    return [f for f in default_flags if f != "--wandb"]
+
+
+def _configure_wandb_from_kaggle_secret():
+    if _KERNEL_WANDB_DISABLE:
+        return False
+    for secret_name in WANDB_SECRET_NAMES:
+        secret_value = os.environ.get(secret_name)
+        if secret_value:
+            os.environ["WANDB_API_KEY"] = secret_value
+            return True
     if _KERNEL_WANDB_API_KEY:
         os.environ["WANDB_API_KEY"] = _KERNEL_WANDB_API_KEY
-        return default_flags
+        return True
     try:
         from kaggle_secrets import UserSecretsClient
-        os.environ["WANDB_API_KEY"] = UserSecretsClient().get_secret("WANDB_API_KEY")
-        return default_flags
-    except Exception:
-        msg = (
-            "WARNING: Cannot load WANDB_API_KEY from _KERNEL_WANDB_API_KEY or Kaggle secrets. "
-            "W&B logging is DISABLED. Set _KERNEL_WANDB_API_KEY in kaggle_main.py or "
-            "add WANDB_API_KEY as a Kaggle secret at https://www.kaggle.com/settings -> API -> Secrets."
-        )
-        print(msg, file=sys.stderr)
-        return [f for f in default_flags if f != "--wandb"]
+    except ImportError:
+        return False
 
+    secrets_client = UserSecretsClient()
+    for secret_name in WANDB_SECRET_NAMES:
+        try:
+            secret_value = secrets_client.get_secret(secret_name)
+        except Exception:
+            continue
+        if secret_value:
+            os.environ["WANDB_API_KEY"] = secret_value
+            print(f"Loaded W&B API key from Kaggle secret {secret_name!r}.")
+            return True
+
+    print(f"WARNING: W&B logging is disabled. Tried Kaggle secrets: {', '.join(WANDB_SECRET_NAMES)}.", file=sys.stderr)
+    return False
 
 def _drm_weight_from_overrides():
     return _KERNEL_DRM_WEIGHT
@@ -311,25 +324,6 @@ def assert_cloned_repo_supports_runtime_flags(repo_root):
             "that includes --maple-precision=amp, --lr-scheduler, FLYP DRM/WiSE flags, "
             "and prototype flags before rerunning."
         )
-
-
-def _configure_wandb_from_kaggle_secret():
-    if _KERNEL_WANDB_DISABLE:
-        return False
-    if os.environ.get("WANDB_API_KEY"):
-        return True
-    if _KERNEL_WANDB_API_KEY:
-        os.environ["WANDB_API_KEY"] = _KERNEL_WANDB_API_KEY
-        return True
-    try:
-        from kaggle_secrets import UserSecretsClient
-    except ImportError:
-        return False
-    try:
-        os.environ["WANDB_API_KEY"] = UserSecretsClient().get_secret("WANDB_API_KEY")
-    except Exception:
-        return False
-    return bool(os.environ.get("WANDB_API_KEY"))
 
 
 def _patch_iwildcam_val():
