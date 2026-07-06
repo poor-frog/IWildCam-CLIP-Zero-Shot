@@ -244,8 +244,8 @@ class KaggleMainTest(unittest.TestCase):
         args = types.SimpleNamespace(
             drm_weight=0.0,
             wise_alphas="0.0,0.1",
-            tail_proto_weight=0.01,
-            tail_proto_scale=50.0,
+            tail_proto_weight=0.001,
+            tail_proto_scale=20.0,
             tail_proto_max_batches=None,
         )
         config_module = types.ModuleType("src.config")
@@ -285,8 +285,8 @@ class KaggleMainTest(unittest.TestCase):
         args = types.SimpleNamespace(
             drm_weight=1.0,
             wise_alphas="0.0,0.1",
-            tail_proto_weight=0.01,
-            tail_proto_scale=50.0,
+            tail_proto_weight=0.001,
+            tail_proto_scale=20.0,
             tail_proto_max_batches=None,
         )
         config_module = types.ModuleType("src.config")
@@ -364,11 +364,11 @@ class KaggleMainTest(unittest.TestCase):
         self.assertIn("--best-metric=F1-macro_all", argv)
         self.assertIn("--drm-weight=0", argv)
         self.assertIn("--drm-warmup-epochs=0", argv)
-        self.assertIn("--tail-proto-weight=0.01", argv)
-        self.assertIn("--tail-proto-scale=50", argv)
+        self.assertIn("--tail-proto-weight=0.001", argv)
+        self.assertIn("--tail-proto-scale=20", argv)
         self.assertIn("--wise-alphas=0.0,0.05,0.1,0.15,0.2,0.3", argv)
-        self.assertIn("--wandb-run-name=tail-aware-flyp-lam0p01-scale50-wise-vitb16-iwildcamval", argv)
-        self.assertIn("--save=/kaggle/working/checkpoints/tail_aware_flyp_lam0p01_scale50_wise_vitb16_iwildcamval.pt", argv)
+        self.assertIn("--wandb-run-name=tail-aware-flyp-lam0p001-scale20-wise-vitb16-iwildcamval", argv)
+        self.assertIn("--save=/kaggle/working/checkpoints/tail_aware_flyp_lam0p001_scale20_wise_vitb16_iwildcamval.pt", argv)
         self.assertIn("--wandb", argv)
 
     def test_build_flyp_training_argv_preserves_overrides(self):
@@ -395,10 +395,10 @@ class KaggleMainTest(unittest.TestCase):
         self.assertIn("--save=/tmp/flyp.pt", argv)
         self.assertNotIn("--model=ViT-B-16", argv)
         self.assertNotIn("--batch-size=256", argv)
-        self.assertNotIn("--tail-proto-weight=0.01", argv)
-        self.assertNotIn("--tail-proto-scale=50", argv)
+        self.assertNotIn("--tail-proto-weight=0.001", argv)
+        self.assertNotIn("--tail-proto-scale=20", argv)
         self.assertNotIn("--wandb", argv)
-        self.assertNotIn("--save=/kaggle/working/checkpoints/tail_aware_flyp_lam0p01_scale50_wise_vitb16_iwildcamval.pt", argv)
+        self.assertNotIn("--save=/kaggle/working/checkpoints/tail_aware_flyp_lam0p001_scale20_wise_vitb16_iwildcamval.pt", argv)
 
     def test_parse_args_accepts_no_wandb_and_disables_wandb(self):
         from src.config import parse_arguments

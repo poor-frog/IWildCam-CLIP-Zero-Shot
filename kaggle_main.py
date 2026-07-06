@@ -13,8 +13,8 @@ DEFAULT_REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_GITHUB_REPO = "https://github.com/poor-frog/IWildCam-CLIP-Zero-Shot.git"
 DEFAULT_KAGGLE_WORKING_REPO = Path("/kaggle/working/IWildCam-CLIP-Zero-Shot")
 FLYP_WISE_FINE_ALPHAS = "0.0,0.05,0.1,0.15,0.2,0.3"
-TAIL_AWARE_FLYP_WEIGHT = "0.01"
-TAIL_AWARE_FLYP_SCALE = "50"
+TAIL_AWARE_FLYP_WEIGHT = "0.001"
+TAIL_AWARE_FLYP_SCALE = "20"
 
 FLYP_DEFAULTS = {
     "--model": "ViT-B-16",
@@ -36,8 +36,8 @@ FLYP_DEFAULTS = {
     "--tail-proto-scale": TAIL_AWARE_FLYP_SCALE,
     "--wise-alphas": FLYP_WISE_FINE_ALPHAS,
     "--wandb-project": "PoorFrogs",
-    "--wandb-run-name": "tail-aware-flyp-lam0p01-scale50-wise-vitb16-iwildcamval",
-    "--save": "/kaggle/working/checkpoints/tail_aware_flyp_lam0p01_scale50_wise_vitb16_iwildcamval.pt",
+    "--wandb-run-name": "tail-aware-flyp-lam0p001-scale20-wise-vitb16-iwildcamval",
+    "--save": "/kaggle/working/checkpoints/tail_aware_flyp_lam0p001_scale20_wise_vitb16_iwildcamval.pt",
 }
 FLYP_DEFAULT_FLAGS = ["--wandb"]
 
