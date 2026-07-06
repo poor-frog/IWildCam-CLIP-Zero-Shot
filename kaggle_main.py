@@ -13,8 +13,10 @@ DEFAULT_REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_GITHUB_REPO = "https://github.com/poor-frog/IWildCam-CLIP-Zero-Shot.git"
 DEFAULT_KAGGLE_WORKING_REPO = Path("/kaggle/working/IWildCam-CLIP-Zero-Shot")
 FLYP_WISE_FINE_ALPHAS = "0.0,0.05,0.1,0.15,0.2,0.3"
-TAIL_AWARE_FLYP_WEIGHT = "0.001"
-TAIL_AWARE_FLYP_SCALE = "20"
+TAIL_AWARE_FLYP_WEIGHT = "0.01"
+TAIL_AWARE_FLYP_SCALE = "50"
+TAIL_AWARE_FLYP_OBJECTIVE = "distill"
+TAIL_AWARE_FLYP_TEMPERATURE = "1.0"
 
 FLYP_DEFAULTS = {
     "--model": "ViT-B-16",
@@ -34,10 +36,12 @@ FLYP_DEFAULTS = {
     "--drm-warmup-epochs": "0",
     "--tail-proto-weight": TAIL_AWARE_FLYP_WEIGHT,
     "--tail-proto-scale": TAIL_AWARE_FLYP_SCALE,
+    "--tail-proto-objective": TAIL_AWARE_FLYP_OBJECTIVE,
+    "--tail-proto-temperature": TAIL_AWARE_FLYP_TEMPERATURE,
     "--wise-alphas": FLYP_WISE_FINE_ALPHAS,
     "--wandb-project": "PoorFrogs",
-    "--wandb-run-name": "tail-aware-flyp-lam0p001-scale20-wise-vitb16-iwildcamval",
-    "--save": "/kaggle/working/checkpoints/tail_aware_flyp_lam0p001_scale20_wise_vitb16_iwildcamval.pt",
+    "--wandb-run-name": "tail-aware-flyp-distill-lam0p01-scale50-wise-vitb16-iwildcamval",
+    "--save": "/kaggle/working/checkpoints/tail_aware_flyp_distill_lam0p01_scale50_wise_vitb16_iwildcamval.pt",
 }
 FLYP_DEFAULT_FLAGS = ["--wandb"]
 
@@ -58,6 +62,8 @@ _KERNEL_DRM_WEIGHT = None              # None = env var → args.drm_weight
 _KERNEL_WISE_ALPHAS = None             # None = env var → args.wise_alphas
 _KERNEL_TAIL_PROTO_WEIGHT = None
 _KERNEL_TAIL_PROTO_SCALE = None
+_KERNEL_TAIL_PROTO_OBJECTIVE = None
+_KERNEL_TAIL_PROTO_TEMPERATURE = None
 _KERNEL_TAIL_PROTO_MAX_BATCHES = None
 _KERNEL_WANDB_DISABLE = False          # True = never call wandb (no API key)
 _KERNEL_WANDB_API_KEY = None
@@ -114,6 +120,14 @@ def _tail_proto_weight_from_overrides():
 
 def _tail_proto_scale_from_overrides():
     return _KERNEL_TAIL_PROTO_SCALE
+
+
+def _tail_proto_objective_from_overrides():
+    return _KERNEL_TAIL_PROTO_OBJECTIVE
+
+
+def _tail_proto_temperature_from_overrides():
+    return _KERNEL_TAIL_PROTO_TEMPERATURE
 
 
 def _tail_proto_max_batches_from_overrides():
@@ -313,6 +327,8 @@ def assert_cloned_repo_supports_runtime_flags(repo_root):
         "--wise-eval-alpha",
         "--tail-proto-weight",
         "--tail-proto-scale",
+        "--tail-proto-objective",
+        "--tail-proto-temperature",
         "--tail-proto-max-batches",
         '"amp"',
     )
@@ -389,6 +405,16 @@ def main():
         args.tail_proto_scale = float(tail_scale_override)
     else:
         args.tail_proto_scale = float(os.environ.get("FLYP_TAIL_PROTO_SCALE", args.tail_proto_scale))
+    tail_objective_override = _tail_proto_objective_from_overrides()
+    if tail_objective_override is not None:
+        args.tail_proto_objective = tail_objective_override
+    else:
+        args.tail_proto_objective = os.environ.get("FLYP_TAIL_PROTO_OBJECTIVE", args.tail_proto_objective)
+    tail_temperature_override = _tail_proto_temperature_from_overrides()
+    if tail_temperature_override is not None:
+        args.tail_proto_temperature = float(tail_temperature_override)
+    else:
+        args.tail_proto_temperature = float(os.environ.get("FLYP_TAIL_PROTO_TEMPERATURE", args.tail_proto_temperature))
     tail_max_batches_override = _tail_proto_max_batches_from_overrides()
     if tail_max_batches_override is not None:
         args.tail_proto_max_batches = int(tail_max_batches_override)

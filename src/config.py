@@ -117,8 +117,10 @@ def parse_arguments():
     parser.add_argument("--adaptive-min-bin-examples", type=int, default=100, help="Minimum validation examples per confidence bin before selecting a bin-specific WiSE alpha.")
     parser.add_argument("--cd-path", type=str, default=None, help="Optional class concept-description JSON path for DRM-style evaluation.")
     parser.add_argument("--cd-beta", type=float, default=0.5, help="DRM-style blend weight: beta * default_prompt_probs + (1 - beta) * concept_description_probs.")
-    parser.add_argument("--tail-proto-weight", type=float, default=0.0, help="Tail-Aware FLYP auxiliary CE weight lambda_tail; 0 disables train-time tail prototypes.")
+    parser.add_argument("--tail-proto-weight", type=float, default=0.0, help="Tail-Aware FLYP auxiliary weight lambda_tail; 0 disables train-time tail prototypes.")
     parser.add_argument("--tail-proto-scale", type=float, default=50.0, help="Logit scale for Tail-Aware FLYP class-prototype logits.")
+    parser.add_argument("--tail-proto-objective", type=str, default="ce", choices=["ce", "distill"], help="Train-time tail objective: hard prototype CE or soft TPA-logit distillation.")
+    parser.add_argument("--tail-proto-temperature", type=float, default=1.0, help="Temperature for --tail-proto-objective=distill.")
     parser.add_argument("--tail-proto-max-batches", type=int, default=None, help="Optional cap for prototype-building batches, intended for smoke tests only.")
 
     parsed_args = parser.parse_args()

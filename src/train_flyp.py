@@ -12,6 +12,7 @@ from src.models.clip_encoder import CLIPEncoder
 from src.models.coop import maybe_data_parallel, unwrap_model
 from src.models.flyp import eval_flyp_single_dataset, train_flyp_one_epoch, wise_interpolate_state_dict
 from src.models.tail_prototype import build_class_prototypes_from_loader
+from src.models.zeroshot import get_zeroshot_classifier
 from src.train_coop import build_eval_dataset, get_validation_score, log_wandb_summary
 from src.train_maple_full import build_step_lr_scheduler, init_wandb
 
@@ -127,6 +128,20 @@ def maybe_build_tail_prototypes(model, train_data, args):
     return prototypes, class_counts
 
 
+def maybe_build_tail_distillation_head(model, args):
+    tail_weight = float(getattr(args, "tail_proto_weight", 0.0) or 0.0)
+    tail_objective = getattr(args, "tail_proto_objective", "ce")
+    if tail_weight == 0.0 or tail_objective != "distill":
+        return None
+
+    print("Building frozen zero-shot head for Tail-Aware FLYP distillation...")
+    classifier = get_zeroshot_classifier(args, unwrap_model(model).model).to(args.device)
+    classifier.eval()
+    for param in classifier.parameters():
+        param.requires_grad_(False)
+    return classifier
+
+
 def main(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -144,6 +159,7 @@ def main(args):
         num_workers=args.workers,
     )
     tail_prototypes, tail_class_counts = maybe_build_tail_prototypes(model, train_data, args)
+    tail_zeroshot_classifier = maybe_build_tail_distillation_head(model, args)
 
     optimizer = torch.optim.AdamW(
         [param for param in model.parameters() if param.requires_grad],
@@ -186,6 +202,7 @@ def main(args):
             drm_weight=getattr(args, "drm_weight", 0.0),
             tail_prototypes=tail_prototypes,
             tail_class_counts=tail_class_counts,
+            tail_zeroshot_classifier=tail_zeroshot_classifier,
             scheduler=scheduler,
             scaler=scaler,
         )
@@ -201,6 +218,7 @@ def main(args):
                 "train/drm_effective_weight": stats.drm_effective_weight,
                 "train/tail_proto_weight": stats.tail_proto_weight,
                 "train/tail_proto_scale": stats.tail_proto_scale,
+                "train/tail_proto_objective": stats.tail_proto_objective,
                 "train/lr": stats.lr,
                 "epoch": epoch,
             })

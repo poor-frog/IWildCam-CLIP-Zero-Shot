@@ -11,7 +11,7 @@ from src.device import optimizer_step
 from src.models.clip_encoder import ImageClassifier
 from src.models.coop import eval_coop_single_dataset
 from src.models.coop import unwrap_model
-from src.models.tail_prototype import tail_prototype_loss
+from src.models.tail_prototype import tail_prototype_distillation_loss, tail_prototype_loss
 from src.models.zeroshot import get_zeroshot_classifier
 
 
@@ -27,6 +27,7 @@ class FlypTrainStats:
     drm_effective_weight: float = 0.0
     tail_proto_weight: float = 0.0
     tail_proto_scale: float = 0.0
+    tail_proto_objective: str = "ce"
     lr: float | None = None
 
 
@@ -176,6 +177,7 @@ def train_flyp_one_epoch(
     drm_weight=0.0,
     tail_prototypes=None,
     tail_class_counts=None,
+    tail_zeroshot_classifier=None,
     scheduler=None,
     scaler=None,
 ):
@@ -194,8 +196,11 @@ def train_flyp_one_epoch(
     max_batches = args.max_train_batches
     tail_weight = float(getattr(args, "tail_proto_weight", 0.0) or 0.0)
     tail_scale = float(getattr(args, "tail_proto_scale", 50.0))
+    tail_objective = getattr(args, "tail_proto_objective", "ce")
     if tail_weight != 0.0 and tail_prototypes is None:
         raise ValueError("tail_prototypes are required when --tail-proto-weight is non-zero.")
+    if tail_weight != 0.0 and tail_objective == "distill" and tail_zeroshot_classifier is None:
+        raise ValueError("tail_zeroshot_classifier is required when --tail-proto-objective=distill.")
 
     for batch_index, data in enumerate(tqdm(dataloader, desc=f"FLYP train epoch {epoch}")):
         if max_batches is not None and batch_index >= max_batches:
@@ -219,13 +224,25 @@ def train_flyp_one_epoch(
             else:
                 drm_loss = clip_loss.new_zeros(())
             if tail_weight != 0.0:
-                tail_raw_loss = tail_prototype_loss(
-                    image_features,
-                    labels,
-                    tail_prototypes,
-                    tail_scale,
-                    class_counts=tail_class_counts,
-                )
+                if tail_objective == "distill":
+                    tail_raw_loss = tail_prototype_distillation_loss(
+                        image_features,
+                        tail_prototypes,
+                        tail_scale,
+                        tail_zeroshot_classifier,
+                        temperature=getattr(args, "tail_proto_temperature", 1.0),
+                        class_counts=tail_class_counts,
+                    )
+                elif tail_objective == "ce":
+                    tail_raw_loss = tail_prototype_loss(
+                        image_features,
+                        labels,
+                        tail_prototypes,
+                        tail_scale,
+                        class_counts=tail_class_counts,
+                    )
+                else:
+                    raise ValueError(f"Unsupported tail prototype objective: {tail_objective}")
                 tail_loss = float(tail_weight) * tail_raw_loss
             else:
                 tail_loss = clip_loss.new_zeros(())
@@ -276,6 +293,7 @@ def train_flyp_one_epoch(
         drm_effective_weight=drm_effective_weight,
         tail_proto_weight=tail_weight,
         tail_proto_scale=tail_scale if tail_weight != 0.0 else 0.0,
+        tail_proto_objective=tail_objective if tail_weight != 0.0 else "none",
         lr=current_lr,
     )
 

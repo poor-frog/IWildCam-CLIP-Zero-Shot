@@ -99,3 +99,29 @@ def tail_prototype_loss(image_features, labels, class_prototypes, prototype_scal
             raise ValueError(f"Tail prototypes are missing labels present in batch: {missing_labels}")
     logits = tail_prototype_logits(image_features, class_prototypes, prototype_scale)
     return F.cross_entropy(logits, labels)
+
+
+def tail_prototype_distillation_loss(
+    image_features,
+    class_prototypes,
+    prototype_scale,
+    classification_head,
+    temperature=1.0,
+    class_counts=None,
+):
+    if float(temperature) <= 0.0:
+        raise ValueError("Tail prototype distillation temperature must be positive.")
+
+    student_logits = classification_head(image_features)
+    with torch.no_grad():
+        prototype_residual = tail_prototype_logits(image_features.detach(), class_prototypes, 1.0)
+        if class_counts is not None:
+            counts = class_counts.to(device=prototype_residual.device)
+            missing = counts <= 0
+            prototype_residual[:, missing] = 0.0
+        teacher_logits = student_logits.detach() + float(prototype_scale) * prototype_residual
+
+    temperature = float(temperature)
+    student_log_probs = F.log_softmax(student_logits / temperature, dim=1)
+    teacher_probs = F.softmax(teacher_logits / temperature, dim=1)
+    return F.kl_div(student_log_probs, teacher_probs, reduction="batchmean") * (temperature ** 2)
