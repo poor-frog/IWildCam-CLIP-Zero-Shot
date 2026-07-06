@@ -16,6 +16,12 @@ TAIL_GAMMA_GRID = os.environ.get("FLYP_TPA_TAIL_GAMMA_GRID", "0")
 TAIL_WEIGHT_MAX = os.environ.get("FLYP_TPA_TAIL_WEIGHT_MAX", "5.0")
 GATE_MODE_GRID = os.environ.get("FLYP_TPA_GATE_MODE_GRID", "none,entropy,margin")
 GATE_STRENGTH_GRID = os.environ.get("FLYP_TPA_GATE_STRENGTH_GRID", "0,0.25,0.5,1.0")
+WANDB_SECRET_NAMES = (
+    "WANDB_API_KEY",
+    "wandb-api-key",
+    "wandb_api_key",
+    "WANDB-API-KEY",
+)
 
 
 def is_project_root(path):
@@ -172,16 +178,33 @@ def patch_iwildcam_val():
 
 
 def configure_wandb():
-    if os.environ.get("WANDB_API_KEY"):
-        return True
+    for secret_name in WANDB_SECRET_NAMES:
+        secret_value = os.environ.get(secret_name)
+        if secret_value:
+            os.environ["WANDB_API_KEY"] = secret_value
+            return True
+
     try:
         from kaggle_secrets import UserSecretsClient
     except ImportError:
         return False
-    try:
-        os.environ["WANDB_API_KEY"] = UserSecretsClient().get_secret("WANDB_API_KEY")
-    except Exception:
-        return False
+
+    secrets_client = UserSecretsClient()
+    for secret_name in WANDB_SECRET_NAMES:
+        try:
+            secret_value = secrets_client.get_secret(secret_name)
+        except Exception:
+            continue
+        if secret_value:
+            os.environ["WANDB_API_KEY"] = secret_value
+            print(f"Loaded W&B API key from Kaggle secret {secret_name!r}.")
+            return True
+
+    print(
+        "W&B logging is disabled because no Kaggle secret was found. "
+        f"Tried: {', '.join(WANDB_SECRET_NAMES)}.",
+        file=sys.stderr,
+    )
     return bool(os.environ.get("WANDB_API_KEY"))
 
 
