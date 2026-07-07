@@ -28,7 +28,7 @@ FLYP_DEFAULTS = {
     "--model": "ViT-B-16",
     "--train-dataset": "IWildCam",
     "--eval-datasets": "IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
-    "--batch-size": "128",
+    "--batch-size": "256",
     "--workers": "2",
     "--epochs": "20",
     "--lr": "1e-5",
@@ -47,8 +47,8 @@ FLYP_DEFAULTS = {
     "--tail-proto-teacher-load": DEFAULT_TAIL_TEACHER_CHECKPOINT,
     "--wise-alphas": FLYP_WISE_FINE_ALPHAS,
     "--wandb-project": "PoorFrogs",
-    "--wandb-run-name": "tail-aware-flyp-fixedtpa-distill-lam0p003-scale50-bs128-wise-vitb16-iwildcamval",
-    "--save": "/kaggle/working/checkpoints/tail_aware_flyp_fixedtpa_distill_lam0p003_scale50_bs128_wise_vitb16_iwildcamval.pt",
+    "--wandb-run-name": "tail-aware-flyp-fixedtpa-distill-lam0p003-scale50-wise-vitb16-iwildcamval",
+    "--save": "/kaggle/working/checkpoints/tail_aware_flyp_fixedtpa_distill_lam0p003_scale50_wise_vitb16_iwildcamval.pt",
 }
 FLYP_DEFAULT_FLAGS = ["--wandb"]
 

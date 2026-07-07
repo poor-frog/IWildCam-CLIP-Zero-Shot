@@ -297,6 +297,8 @@ class FlypModuleTest(unittest.TestCase):
             def __call__(self, captions):
                 return torch.zeros(len(captions), 4, dtype=torch.long)
 
+        calls = []
+
         class TinyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -304,11 +306,13 @@ class FlypModuleTest(unittest.TestCase):
 
             def forward(self, images, text=None):
                 del text
+                calls.append("student")
                 features = images @ self.weight
                 return features, features, torch.ones(())
 
         class FrozenTeacher(torch.nn.Module):
             def forward(self, images):
+                calls.append("teacher")
                 return torch.flip(images, dims=[1])
 
         student_head = torch.nn.Linear(2, 2, bias=False)
@@ -347,6 +351,7 @@ class FlypModuleTest(unittest.TestCase):
 
         self.assertEqual(stats.tail_proto_objective, "fixed_distill")
         self.assertGreater(stats.tail_loss, 0.0)
+        self.assertEqual(calls, ["teacher", "student"])
 
     def test_train_flyp_one_epoch_honors_max_train_batches(self):
         from src.models.flyp import train_flyp_one_epoch

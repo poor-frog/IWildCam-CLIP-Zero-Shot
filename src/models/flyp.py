@@ -217,6 +217,10 @@ def train_flyp_one_epoch(
         data = maybe_dictionarize(data)
         images = data["images"].to(args.device)
         labels = data["labels"]
+        teacher_features = None
+        if tail_weight != 0.0 and tail_objective == "fixed_distill":
+            with torch.inference_mode():
+                teacher_features = tail_teacher_model(images)
         captions = build_flyp_captions(labels, classnames, templates, offset=batch_index)
         text_tokens = tokenizer(captions).to(args.device)
 
@@ -242,8 +246,6 @@ def train_flyp_one_epoch(
                         class_counts=tail_class_counts,
                     )
                 elif tail_objective == "fixed_distill":
-                    with torch.no_grad():
-                        teacher_features = tail_teacher_model(images)
                     tail_raw_loss = fixed_tail_prototype_distillation_loss(
                         image_features,
                         teacher_features,
