@@ -16,6 +16,10 @@ TAIL_GAMMA_GRID = os.environ.get("FLYP_TPA_TAIL_GAMMA_GRID", "0")
 TAIL_WEIGHT_MAX = os.environ.get("FLYP_TPA_TAIL_WEIGHT_MAX", "5.0")
 GATE_MODE_GRID = os.environ.get("FLYP_TPA_GATE_MODE_GRID", "none,entropy,margin")
 GATE_STRENGTH_GRID = os.environ.get("FLYP_TPA_GATE_STRENGTH_GRID", "0,0.25,0.5,1.0")
+SEQUENCE_CONSENSUS_GRID = os.environ.get("FLYP_STMP_SEQUENCE_CONSENSUS_GRID", "0,0.25,0.5,0.75,1.0")
+MULTI_PROTOTYPE_K_GRID = os.environ.get("FLYP_STMP_MULTI_PROTOTYPE_K_GRID", "1,2,4,8")
+SEQUENCE_ID_FIELD = os.environ.get("FLYP_STMP_SEQUENCE_ID_FIELD", "auto")
+MULTI_PROTOTYPE_REDUCTION = os.environ.get("FLYP_STMP_MULTI_PROTOTYPE_REDUCTION", "max")
 WANDB_SECRET_NAMES = (
     "WANDB_API_KEY",
     "wandb-api-key",
@@ -257,6 +261,11 @@ def main():
         f"--tail-weight-max={TAIL_WEIGHT_MAX}",
         f"--gate-mode-grid={GATE_MODE_GRID}",
         f"--gate-strength-grid={GATE_STRENGTH_GRID}",
+        f"--sequence-consensus-grid={SEQUENCE_CONSENSUS_GRID}",
+        f"--sequence-id-field={SEQUENCE_ID_FIELD}",
+        f"--multi-prototype-k-grid={MULTI_PROTOTYPE_K_GRID}",
+        f"--multi-prototype-reduction={MULTI_PROTOTYPE_REDUCTION}",
+        "--audit-metadata",
         "--max-cache-examples-per-class=0",
         "--batch-size=256",
         "--workers=2",
@@ -266,12 +275,12 @@ def main():
         command.extend([
             "--wandb",
             "--wandb-project=PoorFrogs",
-            "--wandb-run-name=flyp-confidence-gated-prototype-adapter-vitb16-iwildcamval",
+            "--wandb-run-name=flyp-stmp-adapter-vitb16-iwildcamval",
         ])
     else:
         command.append("--no-wandb")
 
-    print("Running FLYP + Tail Prototype Adapter evaluation:")
+    print("Running FLYP + STMP-Adapter evaluation:")
     print(" ".join(command))
     subprocess.check_call(command)
 

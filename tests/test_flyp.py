@@ -196,6 +196,83 @@ class FlypModuleTest(unittest.TestCase):
         self.assertTrue(torch.equal(confidence_gate(logits, mode="entropy", strength=0.0), torch.ones(2, 1)))
         self.assertTrue(torch.equal(confidence_gate(logits, mode="margin", strength=0.0), torch.ones(2, 1)))
 
+    def test_metadata_resolver_selects_seq_id_when_present(self):
+        from src.eval_tail_cache import resolve_metadata_field_index
+
+        fields = ["image_id", "location", "seq_id", "datetime"]
+
+        index = resolve_metadata_field_index(fields, "auto", ["seq_id", "sequence_id", "sequence"])
+
+        self.assertEqual(index, 2)
+
+    def test_metadata_resolver_allows_numeric_index_without_field_names(self):
+        from src.eval_tail_cache import resolve_metadata_field_index
+
+        index = resolve_metadata_field_index([], "2", ["seq_id", "sequence_id", "sequence"])
+
+        self.assertEqual(index, 2)
+
+    def test_sequence_consensus_eta_zero_keeps_logits_unchanged(self):
+        from src.eval_tail_cache import apply_sequence_consensus
+
+        logits = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+        metadata = [torch.tensor([10]), torch.tensor([10])]
+
+        blended = apply_sequence_consensus(logits, metadata, sequence_field_index=0, eta=0.0)
+
+        self.assertTrue(torch.equal(blended, logits))
+
+    def test_sequence_consensus_averages_only_matching_sequences(self):
+        from src.eval_tail_cache import apply_sequence_consensus
+
+        logits = torch.tensor([
+            [2.0, 0.0],
+            [0.0, 2.0],
+            [10.0, -10.0],
+        ])
+        metadata = [torch.tensor([1]), torch.tensor([1]), torch.tensor([2])]
+
+        blended = apply_sequence_consensus(logits, metadata, sequence_field_index=0, eta=1.0)
+
+        self.assertTrue(torch.allclose(blended[0], torch.tensor([1.0, 1.0])))
+        self.assertTrue(torch.allclose(blended[1], torch.tensor([1.0, 1.0])))
+        self.assertTrue(torch.equal(blended[2], logits[2]))
+
+    def test_multi_prototype_k_one_matches_mean_prototype_logits(self):
+        from src.eval_tail_cache import build_multi_prototypes, build_prototypes, multi_prototype_logits, prototype_logits
+
+        features = torch.tensor([
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [0.0, 2.0],
+        ])
+        labels = torch.tensor([0, 1, 1])
+        query = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+        mean_prototypes, present = build_prototypes(features, labels, num_classes=3)
+        multi_prototypes, multi_mask = build_multi_prototypes(features, labels, num_classes=3, max_k=1)
+
+        mean_logits = prototype_logits(query, mean_prototypes, present, beta=1.0)
+        multi_logits = multi_prototype_logits(query, multi_prototypes, multi_mask, beta=1.0)
+
+        self.assertTrue(torch.allclose(multi_logits, mean_logits))
+
+    def test_multi_prototype_max_scores_best_class_prototype_and_masks_missing(self):
+        from src.eval_tail_cache import build_multi_prototypes, multi_prototype_logits
+
+        features = torch.tensor([
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [0.0, -1.0],
+        ])
+        labels = torch.tensor([0, 1, 1])
+        query = torch.tensor([[0.0, -1.0]])
+        prototypes, mask = build_multi_prototypes(features, labels, num_classes=3, max_k=2)
+
+        logits = multi_prototype_logits(query, prototypes, mask, beta=1.0, reduction="max")
+
+        self.assertGreater(logits[0, 1].item(), logits[0, 0].item())
+        self.assertEqual(logits[0, 2].item(), torch.finfo(torch.float32).min)
+
     def test_train_flyp_one_epoch_adds_tail_prototype_auxiliary_loss(self):
         from src.models.flyp import train_flyp_one_epoch
 
