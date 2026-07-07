@@ -99,17 +99,43 @@ def should_use_flyp_amp(args):
     return str(args.device).startswith("cuda") and getattr(args, "maple_precision", "fp32") == "amp"
 
 
-def maybe_build_tail_prototypes(model, train_data, args):
+def maybe_build_tail_teacher_model(args):
+    tail_weight = float(getattr(args, "tail_proto_weight", 0.0) or 0.0)
+    tail_objective = getattr(args, "tail_proto_objective", "ce")
+    if tail_weight == 0.0 or tail_objective != "fixed_distill":
+        return None
+    teacher_path = getattr(args, "tail_proto_teacher_load", None)
+    if teacher_path is None:
+        raise ValueError("--tail-proto-teacher-load is required when --tail-proto-objective=fixed_distill.")
+
+    print(f"Loading fixed Tail-Aware FLYP teacher from {teacher_path}...")
+    teacher_model = maybe_data_parallel(CLIPEncoder.load(teacher_path).to(args.device), args)
+    teacher_model.eval()
+    for param in teacher_model.parameters():
+        param.requires_grad_(False)
+    return teacher_model
+
+
+def tail_prototype_source_model(model, tail_teacher_model, args):
+    if getattr(args, "tail_proto_objective", "ce") == "fixed_distill":
+        if tail_teacher_model is None:
+            raise ValueError("tail_teacher_model is required for fixed_distill prototypes.")
+        return tail_teacher_model
+    return model
+
+
+def maybe_build_tail_prototypes(model, train_data, args, tail_teacher_model=None):
     tail_weight = float(getattr(args, "tail_proto_weight", 0.0) or 0.0)
     if tail_weight == 0.0:
         return None, None
 
+    source_model = tail_prototype_source_model(model, tail_teacher_model, args)
     print(
         "Building frozen Tail-Aware FLYP class prototypes "
         f"(scale={getattr(args, 'tail_proto_scale', 50.0):g}, weight={tail_weight:g})..."
     )
     prototypes, class_counts = build_class_prototypes_from_loader(
-        model,
+        source_model,
         train_data.train_loader,
         args.device,
         num_classes=len(train_data.classnames),
@@ -131,11 +157,27 @@ def maybe_build_tail_prototypes(model, train_data, args):
 def maybe_build_tail_distillation_head(model, args):
     tail_weight = float(getattr(args, "tail_proto_weight", 0.0) or 0.0)
     tail_objective = getattr(args, "tail_proto_objective", "ce")
-    if tail_weight == 0.0 or tail_objective != "distill":
+    if tail_weight == 0.0 or tail_objective not in {"distill", "fixed_distill"}:
         return None
 
-    print("Building frozen zero-shot head for Tail-Aware FLYP distillation...")
+    print("Building frozen student zero-shot head for Tail-Aware FLYP distillation...")
     classifier = get_zeroshot_classifier(args, unwrap_model(model).model).to(args.device)
+    classifier.eval()
+    for param in classifier.parameters():
+        param.requires_grad_(False)
+    return classifier
+
+
+def maybe_build_tail_teacher_head(tail_teacher_model, args):
+    tail_weight = float(getattr(args, "tail_proto_weight", 0.0) or 0.0)
+    tail_objective = getattr(args, "tail_proto_objective", "ce")
+    if tail_weight == 0.0 or tail_objective != "fixed_distill":
+        return None
+    if tail_teacher_model is None:
+        raise ValueError("tail_teacher_model is required when --tail-proto-objective=fixed_distill.")
+
+    print("Building frozen teacher zero-shot head for Tail-Aware FLYP distillation...")
+    classifier = get_zeroshot_classifier(args, unwrap_model(tail_teacher_model).model).to(args.device)
     classifier.eval()
     for param in classifier.parameters():
         param.requires_grad_(False)
@@ -158,8 +200,10 @@ def main(args):
         batch_size=args.batch_size,
         num_workers=args.workers,
     )
-    tail_prototypes, tail_class_counts = maybe_build_tail_prototypes(model, train_data, args)
+    tail_teacher_model = maybe_build_tail_teacher_model(args)
+    tail_prototypes, tail_class_counts = maybe_build_tail_prototypes(model, train_data, args, tail_teacher_model=tail_teacher_model)
     tail_zeroshot_classifier = maybe_build_tail_distillation_head(model, args)
+    tail_teacher_classifier = maybe_build_tail_teacher_head(tail_teacher_model, args)
 
     optimizer = torch.optim.AdamW(
         [param for param in model.parameters() if param.requires_grad],
@@ -203,6 +247,8 @@ def main(args):
             tail_prototypes=tail_prototypes,
             tail_class_counts=tail_class_counts,
             tail_zeroshot_classifier=tail_zeroshot_classifier,
+            tail_teacher_model=tail_teacher_model,
+            tail_teacher_classifier=tail_teacher_classifier,
             scheduler=scheduler,
             scaler=scaler,
         )

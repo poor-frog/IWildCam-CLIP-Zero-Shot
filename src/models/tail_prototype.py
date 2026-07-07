@@ -125,3 +125,32 @@ def tail_prototype_distillation_loss(
     student_log_probs = F.log_softmax(student_logits / temperature, dim=1)
     teacher_probs = F.softmax(teacher_logits / temperature, dim=1)
     return F.kl_div(student_log_probs, teacher_probs, reduction="batchmean") * (temperature ** 2)
+
+
+def fixed_tail_prototype_distillation_loss(
+    image_features,
+    teacher_image_features,
+    class_prototypes,
+    prototype_scale,
+    student_classification_head,
+    teacher_classification_head,
+    temperature=1.0,
+    class_counts=None,
+):
+    if float(temperature) <= 0.0:
+        raise ValueError("Tail prototype distillation temperature must be positive.")
+
+    student_logits = student_classification_head(image_features)
+    with torch.no_grad():
+        teacher_logits = teacher_classification_head(teacher_image_features)
+        prototype_residual = tail_prototype_logits(teacher_image_features, class_prototypes, 1.0)
+        if class_counts is not None:
+            counts = class_counts.to(device=prototype_residual.device)
+            missing = counts <= 0
+            prototype_residual[:, missing] = 0.0
+        teacher_logits = teacher_logits + float(prototype_scale) * prototype_residual
+
+    temperature = float(temperature)
+    student_log_probs = F.log_softmax(student_logits / temperature, dim=1)
+    teacher_probs = F.softmax(teacher_logits / temperature, dim=1)
+    return F.kl_div(student_log_probs, teacher_probs, reduction="batchmean") * (temperature ** 2)

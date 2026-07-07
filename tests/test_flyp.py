@@ -111,6 +111,28 @@ class FlypModuleTest(unittest.TestCase):
 
         self.assertLess(consistent.item(), contradictory.item())
 
+    def test_fixed_tail_prototype_distillation_uses_frozen_teacher_features(self):
+        from src.models.tail_prototype import fixed_tail_prototype_distillation_loss
+
+        student_head = torch.nn.Linear(2, 2, bias=False)
+        teacher_head = torch.nn.Linear(2, 2, bias=False)
+        with torch.no_grad():
+            student_head.weight.copy_(torch.eye(2))
+            teacher_head.weight.copy_(torch.eye(2))
+        student_features = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+        teacher_features = torch.tensor([[0.0, 1.0], [1.0, 0.0]])
+
+        loss = fixed_tail_prototype_distillation_loss(
+            student_features,
+            teacher_features,
+            torch.eye(2),
+            prototype_scale=10.0,
+            student_classification_head=student_head,
+            teacher_classification_head=teacher_head,
+        )
+
+        self.assertGreater(loss.item(), 0.0)
+
     def test_tail_class_weights_emphasize_rare_classes(self):
         from src.models.tail_prototype import tail_class_weights
 
@@ -267,6 +289,64 @@ class FlypModuleTest(unittest.TestCase):
         self.assertEqual(stats.tail_proto_objective, "distill")
         self.assertGreater(stats.tail_loss, 0.0)
         self.assertAlmostEqual(stats.loss, stats.clip_loss + stats.tail_loss, places=6)
+
+    def test_train_flyp_one_epoch_adds_fixed_tail_teacher_distillation_loss(self):
+        from src.models.flyp import train_flyp_one_epoch
+
+        class TinyTokenizer:
+            def __call__(self, captions):
+                return torch.zeros(len(captions), 4, dtype=torch.long)
+
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.eye(2))
+
+            def forward(self, images, text=None):
+                del text
+                features = images @ self.weight
+                return features, features, torch.ones(())
+
+        class FrozenTeacher(torch.nn.Module):
+            def forward(self, images):
+                return torch.flip(images, dims=[1])
+
+        student_head = torch.nn.Linear(2, 2, bias=False)
+        teacher_head = torch.nn.Linear(2, 2, bias=False)
+        with torch.no_grad():
+            student_head.weight.copy_(torch.eye(2))
+            teacher_head.weight.copy_(torch.eye(2))
+        batch = {"images": torch.eye(2), "labels": torch.tensor([0, 1])}
+        args = SimpleNamespace(
+            device="cpu",
+            model="ViT-B-16",
+            max_train_batches=1,
+            tail_proto_weight=0.5,
+            tail_proto_scale=10.0,
+            tail_proto_objective="fixed_distill",
+            tail_proto_temperature=1.0,
+        )
+        model = TinyModel()
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.0)
+
+        with patch("src.models.flyp.open_clip.get_tokenizer", return_value=TinyTokenizer()):
+            stats = train_flyp_one_epoch(
+                model,
+                [batch],
+                optimizer,
+                args,
+                ["frog", "deer"],
+                [lambda c: f"a photo of {c}."],
+                epoch=1,
+                tail_prototypes=torch.eye(2),
+                tail_class_counts=torch.tensor([1, 1]),
+                tail_zeroshot_classifier=student_head,
+                tail_teacher_model=FrozenTeacher(),
+                tail_teacher_classifier=teacher_head,
+            )
+
+        self.assertEqual(stats.tail_proto_objective, "fixed_distill")
+        self.assertGreater(stats.tail_loss, 0.0)
 
     def test_train_flyp_one_epoch_honors_max_train_batches(self):
         from src.models.flyp import train_flyp_one_epoch

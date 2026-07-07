@@ -11,7 +11,7 @@ from src.device import optimizer_step
 from src.models.clip_encoder import ImageClassifier
 from src.models.coop import eval_coop_single_dataset
 from src.models.coop import unwrap_model
-from src.models.tail_prototype import tail_prototype_distillation_loss, tail_prototype_loss
+from src.models.tail_prototype import fixed_tail_prototype_distillation_loss, tail_prototype_distillation_loss, tail_prototype_loss
 from src.models.zeroshot import get_zeroshot_classifier
 
 
@@ -178,6 +178,8 @@ def train_flyp_one_epoch(
     tail_prototypes=None,
     tail_class_counts=None,
     tail_zeroshot_classifier=None,
+    tail_teacher_model=None,
+    tail_teacher_classifier=None,
     scheduler=None,
     scaler=None,
 ):
@@ -201,6 +203,12 @@ def train_flyp_one_epoch(
         raise ValueError("tail_prototypes are required when --tail-proto-weight is non-zero.")
     if tail_weight != 0.0 and tail_objective == "distill" and tail_zeroshot_classifier is None:
         raise ValueError("tail_zeroshot_classifier is required when --tail-proto-objective=distill.")
+    if tail_weight != 0.0 and tail_objective == "fixed_distill":
+        if tail_zeroshot_classifier is None or tail_teacher_model is None or tail_teacher_classifier is None:
+            raise ValueError(
+                "tail_zeroshot_classifier, tail_teacher_model, and tail_teacher_classifier are required "
+                "when --tail-proto-objective=fixed_distill."
+            )
 
     for batch_index, data in enumerate(tqdm(dataloader, desc=f"FLYP train epoch {epoch}")):
         if max_batches is not None and batch_index >= max_batches:
@@ -230,6 +238,19 @@ def train_flyp_one_epoch(
                         tail_prototypes,
                         tail_scale,
                         tail_zeroshot_classifier,
+                        temperature=getattr(args, "tail_proto_temperature", 1.0),
+                        class_counts=tail_class_counts,
+                    )
+                elif tail_objective == "fixed_distill":
+                    with torch.no_grad():
+                        teacher_features = tail_teacher_model(images)
+                    tail_raw_loss = fixed_tail_prototype_distillation_loss(
+                        image_features,
+                        teacher_features,
+                        tail_prototypes,
+                        tail_scale,
+                        tail_zeroshot_classifier,
+                        tail_teacher_classifier,
                         temperature=getattr(args, "tail_proto_temperature", 1.0),
                         class_counts=tail_class_counts,
                     )
