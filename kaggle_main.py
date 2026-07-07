@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 
 
+os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
+
 DEFAULT_KAGGLE_DATASET = "/kaggle/input/iwildcam-v2-0-2020-wilds-dataset"
 DEFAULT_KAGGLE_DATASET_CANDIDATES = [
     DEFAULT_KAGGLE_DATASET,
@@ -26,8 +28,8 @@ FLYP_DEFAULTS = {
     "--model": "ViT-B-16",
     "--train-dataset": "IWildCam",
     "--eval-datasets": "IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
-    "--batch-size": "256",
-    "--workers": "4",
+    "--batch-size": "128",
+    "--workers": "2",
     "--epochs": "20",
     "--lr": "1e-5",
     "--wd": "0.2",
@@ -45,8 +47,8 @@ FLYP_DEFAULTS = {
     "--tail-proto-teacher-load": DEFAULT_TAIL_TEACHER_CHECKPOINT,
     "--wise-alphas": FLYP_WISE_FINE_ALPHAS,
     "--wandb-project": "PoorFrogs",
-    "--wandb-run-name": "tail-aware-flyp-fixedtpa-distill-lam0p003-scale50-wise-vitb16-iwildcamval",
-    "--save": "/kaggle/working/checkpoints/tail_aware_flyp_fixedtpa_distill_lam0p003_scale50_wise_vitb16_iwildcamval.pt",
+    "--wandb-run-name": "tail-aware-flyp-fixedtpa-distill-lam0p003-scale50-bs128-wise-vitb16-iwildcamval",
+    "--save": "/kaggle/working/checkpoints/tail_aware_flyp_fixedtpa_distill_lam0p003_scale50_bs128_wise_vitb16_iwildcamval.pt",
 }
 FLYP_DEFAULT_FLAGS = ["--wandb"]
 
