@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 DEFAULT_KAGGLE_DATASET = "/kaggle/input/iwildcam-v2-0-2020-wilds-dataset"
 DEFAULT_KAGGLE_DATASET_CANDIDATES = [
@@ -207,10 +208,10 @@ def main():
     patch_iwildcam_val()
 
     data_location = prepare_iwildcam_layout(repo_root)
-    batch_size = os.environ.get("FLYP_VITL14_BATCH_SIZE", "64")
+    batch_size = os.environ.get("FLYP_VITL14_BATCH_SIZE", "16")
     workers = os.environ.get("FLYP_VITL14_WORKERS", "2")
     epochs = os.environ.get("FLYP_VITL14_EPOCHS", "20")
-    save_path = "/kaggle/working/checkpoints/flyp_nodrm_wise_vitl14_iwildcamval.pt"
+    save_path = "/kaggle/working/checkpoints/flyp_nodrm_wise_vitl14_bs16_iwildcamval.pt"
     command = [
         sys.executable,
         "src/train_flyp.py",
@@ -238,7 +239,7 @@ def main():
         command.extend([
             "--wandb",
             "--wandb-project=PoorFrogs",
-            "--wandb-run-name=flyp-nodrm-wise-vitl14-iwildcamval",
+            "--wandb-run-name=flyp-nodrm-wise-vitl14-bs16-iwildcamval",
         ])
     else:
         command.append("--no-wandb")
