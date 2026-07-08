@@ -32,6 +32,24 @@ Task 7 inventory lists checkpoint filenames only; `.pt` tensor contents were not
 
 Task 7 did not run new experiments. Tasks 1-6 evidence establishes split access, `IWildCamVal` support, train-split class priors, and logit-adjustment selection guardrails, but it does not contain new MaPLe or MaPLe+LoRA metric tables. Therefore MaPLe/MaPLe+LoRA Top-1 and macro-F1 values are unknown/unverified until re-evaluated in PoorFrogs and recorded with evidence.
 
+## Current promoted ViT-B/16 method
+
+The current promoted ViT-B/16 method is **STMP-Adapter** on top of the
+`flyp_nodrm_wise_vitb16_iwildcamval_best.pt` checkpoint. It is selected on
+`IWildCamVal` and reported on final splits without using `IWildCamOOD` for
+hyperparameter selection.
+
+Evidence file:
+
+```text
+outputs/stmp_adapter_kaggle_2026-07-08.md
+```
+
+| Method | IWildCamVal F1 | IWildCamIDVal F1 | IWildCamID F1 | IWildCamOOD F1 |
+| ------ | -------------- | ---------------- | ------------- | -------------- |
+| FLYP + WiSE default logits | 36.94% | 44.89% | 47.65% | 31.74% |
+| STMP-Adapter | 41.93% | 50.53% | 54.41% | 38.01% |
+
 ## CoOp Phase 1.1 baseline documented in PoorFrogs
 
 Phase 1.1 trains CoOp prompt vectors on the local OpenAI CLIP `ViT-B/32` backbone and selects the best checkpoint by validation F1. This section preserves the existing PoorFrogs-local documented baseline and checkpoint provenance; Task 7 did not newly rerun this experiment.

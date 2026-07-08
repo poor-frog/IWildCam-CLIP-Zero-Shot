@@ -1,7 +1,7 @@
 {
-  "id": "thanhquang71/poorfrogs-tail-aware-flyp-fixedtpa-distill-iwildcam",
-  "title": "PoorFrogs Tail-Aware FLYP Fixed TPA Distill IWildCam",
-  "code_file": "kaggle_main.py",
+  "id": "kimjongub/poorfrogs-stmp-adapter-iwildcam",
+  "title": "poorfrogs-stmp-adapter-iwildcam",
+  "code_file": "kaggle_eval_tail_prototype_adapter.py",
   "language": "python",
   "kernel_type": "script",
   "is_private": true,

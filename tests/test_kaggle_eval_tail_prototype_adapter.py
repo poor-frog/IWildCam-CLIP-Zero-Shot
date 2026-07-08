@@ -29,10 +29,12 @@ class KaggleEvalTailPrototypeAdapterTest(unittest.TestCase):
                 os.chdir(original_cwd)
 
         command = captured[-1]
-        self.assertIn("--sequence-consensus-grid=0,0.25,0.5,0.75,1.0", command)
+        self.assertIn("--sequence-consensus-grid=0,0.5", command)
         self.assertIn("--sequence-id-field=auto", command)
-        self.assertIn("--multi-prototype-k-grid=1,2,4,8", command)
+        self.assertIn("--multi-prototype-k-grid=1,8", command)
         self.assertIn("--multi-prototype-reduction=max", command)
+        self.assertIn("--gate-mode-grid=none,margin,entropy", command)
+        self.assertIn("--gate-strength-grid=0,0.25,1.0", command)
         self.assertIn("--audit-metadata", command)
         self.assertIn("--no-wandb", command)
 
