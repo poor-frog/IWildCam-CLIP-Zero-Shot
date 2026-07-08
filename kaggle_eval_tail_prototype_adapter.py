@@ -281,7 +281,7 @@ def main():
         command.extend([
             "--wandb",
             "--wandb-project=PoorFrogs",
-            "--wandb-run-name=flyp-stmp-adapter-vitb16-iwildcamval",
+            "--wandb-run-name=flyp-stmp-key-ablation-vitb16-iwildcamval",
         ])
     else:
         command.append("--no-wandb")
