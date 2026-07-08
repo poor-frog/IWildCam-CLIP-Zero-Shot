@@ -71,6 +71,7 @@ def parse_arguments():
     parser.add_argument("--multi-prototype-k-grid", type=str, default="1")
     parser.add_argument("--multi-prototype-reduction", type=str, default="max", choices=["max", "logsumexp"])
     parser.add_argument("--audit-metadata", action="store_true")
+    parser.add_argument("--report-key-ablation-candidates", action="store_true")
     parser.add_argument("--cd-path", type=str, default=None, help="Optional DRM concept-description JSON for concept ablations.")
     parser.add_argument("--concept-beta-grid", type=str, default="0,0.25,0.5,0.75,1")
     parser.add_argument("--max-cache-examples-per-class", type=int, default=0)
@@ -459,6 +460,51 @@ def print_tail_cache_summary(summary_rows):
         print(f"| {dataset_name:<13} | {head_name:<13} | {top1_text:<6} | {f1_text:<8} |")
 
 
+def candidate_matches(row, *, sequence_eta, prototype_k, gate_mode, gate_strength):
+    return (
+        row["head"] == "prototype"
+        and float(row["prototype_scale"]) == 50.0
+        and float(row["tau"]) == 0.0
+        and float(row["tail_gamma"]) == 0.0
+        and int(row["prototype_k"]) == int(prototype_k)
+        and float(row["sequence_eta"]) == float(sequence_eta)
+        and row["gate_mode"] == gate_mode
+        and float(row["gate_strength"]) == float(gate_strength)
+    )
+
+
+def find_key_ablation_rows(selection_rows):
+    targets = [
+        ("tpa_baseline", {"sequence_eta": 0.0, "prototype_k": 1, "gate_mode": "none", "gate_strength": 0.0}),
+        ("sequence_only", {"sequence_eta": 0.5, "prototype_k": 1, "gate_mode": "none", "gate_strength": 0.0}),
+        ("selected_gate", {"sequence_eta": 0.5, "prototype_k": 1, "gate_mode": "margin", "gate_strength": 0.25}),
+        ("multiproto_sanity", {"sequence_eta": 0.5, "prototype_k": 8, "gate_mode": "entropy", "gate_strength": 1.0}),
+    ]
+    rows = []
+    for label, target in targets:
+        match = next((row for row in selection_rows if candidate_matches(row, **target)), None)
+        if match is not None:
+            rows.append((label, match))
+    return rows
+
+
+def print_key_ablation_summary(summary_rows):
+    if not summary_rows:
+        return
+    print("\n=== Key STMP Final Ablation Candidates ===")
+    print("| Split         | Candidate        | K | Seq eta | Gate   | Strength | Val F1 | Top-1  | F1-macro |")
+    print("| ------------- | ---------------- | - | ------- | ------ | -------- | ------ | ------ | -------- |")
+    for dataset_name, label, row, top1, f1_macro in summary_rows:
+        val_f1 = "N/A" if row["F1-macro_all"] is None else f"{row['F1-macro_all'] * 100:.2f}%"
+        top1_text = f"{top1 * 100:.2f}%" if top1 is not None else "N/A"
+        f1_text = f"{f1_macro * 100:.2f}%" if f1_macro is not None else "N/A"
+        print(
+            f"| {dataset_name:<13} | {label:<16} | {row['prototype_k']:<1d} | "
+            f"{row['sequence_eta']:<7g} | {row['gate_mode']:<6} | {row['gate_strength']:<8g} | "
+            f"{val_f1:<6} | {top1_text:<6} | {f1_text:<8} |"
+        )
+
+
 def main(args):
     if args.load is None:
         raise ValueError("--load must point to a FLYP CLIPEncoder checkpoint.")
@@ -566,8 +612,10 @@ def main(args):
         sequence_field_index=sequence_field_index,
     )
     print_selection(selection_rows, best_by_head)
+    key_ablation_rows = find_key_ablation_rows(selection_rows) if args.report_key_ablation_candidates else []
 
     summary_rows = []
+    key_ablation_summary_rows = []
     for dataset_name in args.eval_datasets:
         print(f"Evaluating tail cache on {dataset_name}...")
         dataset = build_eval_dataset(dataset_name, encoder, args)
@@ -625,8 +673,30 @@ def main(args):
                     f"tail_cache/{head_name}/gate_strength": best["gate_strength"],
                     f"tail_cache/{head_name}/concept_beta": best["concept_beta"],
                 })
+        for label, candidate in key_ablation_rows:
+            results = evaluate_candidate(
+                dataset,
+                base_logits,
+                proto_logits_by_k,
+                cd_logits,
+                features["labels"],
+                features["metadata"],
+                args,
+                class_priors,
+                tail_weights_by_gamma,
+                candidate,
+                sequence_field_index=sequence_field_index,
+            )
+            key_ablation_summary_rows.append((
+                dataset_name,
+                label,
+                candidate,
+                results.get("top1"),
+                results.get("F1-macro_all"),
+            ))
 
     print_tail_cache_summary(summary_rows)
+    print_key_ablation_summary(key_ablation_summary_rows)
     preferred_head = "concept_prototype" if "concept_prototype" in best_by_head else "prototype_tau"
     cache_summary_rows = [(dataset, top1, f1) for dataset, head, top1, f1 in summary_rows if head == preferred_head]
     log_wandb_summary(wandb, cache_summary_rows)

@@ -36,6 +36,7 @@ class KaggleEvalTailPrototypeAdapterTest(unittest.TestCase):
         self.assertIn("--gate-mode-grid=none,margin,entropy", command)
         self.assertIn("--gate-strength-grid=0,0.25,1.0", command)
         self.assertIn("--audit-metadata", command)
+        self.assertIn("--report-key-ablation-candidates", command)
         self.assertIn("--no-wandb", command)
 
 

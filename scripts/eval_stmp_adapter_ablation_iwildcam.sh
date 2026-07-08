@@ -30,6 +30,7 @@ PYTHONPATH=. .venv/bin/python src/eval_tail_cache.py \
   --gate-mode-grid="${GATE_MODE_GRID}" \
   --gate-strength-grid="${GATE_STRENGTH_GRID}" \
   --audit-metadata \
+  --report-key-ablation-candidates \
   --max-cache-examples-per-class=0 \
   --batch-size="${BATCH_SIZE}" \
   --workers="${WORKERS}" \

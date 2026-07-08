@@ -273,6 +273,36 @@ class FlypModuleTest(unittest.TestCase):
         self.assertGreater(logits[0, 1].item(), logits[0, 0].item())
         self.assertEqual(logits[0, 2].item(), torch.finfo(torch.float32).min)
 
+    def test_find_key_ablation_rows_selects_canonical_stmp_candidates(self):
+        from src.eval_tail_cache import find_key_ablation_rows
+
+        def row(sequence_eta, prototype_k, gate_mode, gate_strength):
+            return {
+                "head": "prototype",
+                "prototype_scale": 50.0,
+                "tau": 0.0,
+                "tail_gamma": 0.0,
+                "prototype_k": prototype_k,
+                "sequence_eta": sequence_eta,
+                "gate_mode": gate_mode,
+                "gate_strength": gate_strength,
+                "concept_beta": None,
+                "score": 0.0,
+                "top1": 0.0,
+                "F1-macro_all": 0.0,
+            }
+
+        rows = [
+            row(0.0, 1, "none", 0.0),
+            row(0.5, 1, "none", 0.0),
+            row(0.5, 1, "margin", 0.25),
+            row(0.5, 8, "entropy", 1.0),
+        ]
+
+        labels = [label for label, _ in find_key_ablation_rows(rows)]
+
+        self.assertEqual(labels, ["tpa_baseline", "sequence_only", "selected_gate", "multiproto_sanity"])
+
     def test_train_flyp_one_epoch_adds_tail_prototype_auxiliary_loss(self):
         from src.models.flyp import train_flyp_one_epoch
 

@@ -271,6 +271,7 @@ def main():
         f"--multi-prototype-k-grid={MULTI_PROTOTYPE_K_GRID}",
         f"--multi-prototype-reduction={MULTI_PROTOTYPE_REDUCTION}",
         "--audit-metadata",
+        "--report-key-ablation-candidates",
         "--max-cache-examples-per-class=0",
         "--batch-size=256",
         "--workers=2",
