@@ -14,6 +14,7 @@ The run does not use DRM concept descriptions.
 
 ```text
 outputs_log/stmp_adapter_kaggle_2026-07-08.log
+outputs_log/stmp_key_ablation_kaggle_2026-07-08.log
 ```
 
 ## Checkpoint
@@ -59,6 +60,28 @@ Selected on `IWildCamVal` using `F1-macro_all`.
 | IWildCamID | 70.15 | 47.65 | 74.58 | 54.41 | +6.76 |
 | IWildCamOOD | 70.12 | 31.74 | 75.73 | 38.01 | +6.27 |
 
+## Key Final Ablation
+
+The final key-ablation run evaluates the canonical candidates on all final
+splits after validation selection. It confirms that most of the gain comes from
+sequence consensus, not confidence gating or multi-prototype scoring.
+
+| Candidate | K | Seq eta | Gate | Strength | IWildCamVal F1 | IWildCamIDVal F1 | IWildCamID F1 | IWildCamOOD F1 |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| TPA baseline | 1 | 0 | none | 0 | 39.60 | 48.09 | 51.41 | 36.11 |
+| STMP sequence-only | 1 | 0.5 | none | 0 | 41.58 | 50.37 | 54.61 | 37.98 |
+| STMP selected-gate | 1 | 0.5 | margin | 0.25 | 41.93 | 50.53 | 54.41 | 38.01 |
+| Multi-prototype sanity | 8 | 0.5 | entropy | 1.0 | 41.86 | 47.40 | 49.04 | 36.07 |
+
+OOD contribution:
+
+```text
+TPA baseline        36.11
+Sequence-only STMP  37.98  (+1.87 over TPA)
+Selected-gate STMP  38.01  (+0.03 over sequence-only)
+K=8 multi-prototype 36.07  (-0.04 vs TPA)
+```
+
 ## Comparison to Previous Best TPA
 
 | Method | IWildCamOOD F1 |
@@ -83,7 +106,9 @@ This run satisfies both thresholds.
 
 ## Decision
 
-Promote **STMP-Adapter** as the current main ViT-B/16 method.
+Promote **STMP-Adapter sequence-only** as the current main ViT-B/16 method
+claim. Use selected-gate as a minor validation-selected ablation, not as the
+core method.
 
 The cleanest current claim is:
 
@@ -92,27 +117,31 @@ Sequence-aware prototype adaptation improves FLYP + WiSE on iWildCam by using
 camera-trap sequence metadata during validation-time adaptation.
 ```
 
-Do not present confidence gating as the primary contribution yet. The selected
-gate improves validation F1 only slightly over the no-gate sequence candidate:
+Canonical method config for the main claim:
 
 ```text
-gate=margin,strength=0.25: Val F1 = 41.93
-gate=none:                 Val F1 = 41.58
+prototype_scale = 50
+K = 1
+sequence_eta = 0.5
+gate = none
+tau = 0
+tail_gamma = 0
+selection_split = IWildCamVal
 ```
 
-Do not present multi-prototype as the primary contribution yet. The selected
-configuration used `K=1`; `K=8` was competitive on validation but did not win.
+Selected-gate config:
 
-## Next Ablation
+```text
+prototype_scale = 50
+K = 1
+sequence_eta = 0.5
+gate = margin
+gate_strength = 0.25
+tau = 0
+tail_gamma = 0
+selection_split = IWildCamVal
+```
 
-Run a focused STMP ablation to isolate the contribution:
-
-| Ablation | Expected purpose |
-| --- | --- |
-| `eta=0, K=1, gate=none` | Original TPA baseline under the same launcher |
-| `eta=0.5, K=1, gate=none` | Sequence-only STMP |
-| `eta=0.5, K=1, gate=margin,strength=0.25` | Selected STMP |
-| `eta=0.5, K=8, gate=entropy,strength=1.0` | Multi-prototype sanity check |
-
-If sequence-only is close to selected STMP on OOD, the method framing should
-center on sequence consensus rather than gate tuning.
+Do not present confidence gating as the primary contribution. It improves OOD
+F1 only from `37.98` to `38.01`. Do not present multi-prototype as a positive
+contribution in the current ViT-B/16 setting. `K=8` drops to OOD F1 `36.07`.

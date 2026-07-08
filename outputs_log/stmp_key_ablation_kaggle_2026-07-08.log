@@ -1,0 +1,137 @@
+Loading fine-tuned FLYP checkpoint from /kaggle/input/datasets/thanhquang71/flyp-nodrm-wise-vitb16-iwildcamval-checkpoint/flyp_nodrm_wise_vitb16_iwildcamval_best.pt
+Loading image encoder from /kaggle/input/datasets/thanhquang71/flyp-nodrm-wise-vitb16-iwildcamval-checkpoint/flyp_nodrm_wise_vitb16_iwildcamval_best.pt
+
+=== Metadata Audit: train ===
+metadata_fields=['location', 'sequence', 'year', 'month', 'day', 'hour', 'minute', 'second', 'y', 'from_source_domain']
+resolved_sequence_index=1
+resolved_camera_index=0
+resolved_datetime_index=None
+sample_metadata_rows=[[0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1], [0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1], [0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1]]
+Tail cache train features: 100%|██████████| 508/508 [25:23<00:00,  3.00s/it]
+Built tail cache with 129809 examples across 182/182 classes.
+/usr/local/lib/python3.12/dist-packages/torch/utils/data/dataloader.py:424: UserWarning: This DataLoader will create 16 worker processes in total. Our suggested max number of worker in current system is 4, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  self.check_worker_number_rationality()
+100%|██████████| 182/182 [00:01<00:00, 108.81it/s]
+
+=== Metadata Audit: IWildCamVal ===
+metadata_fields=['location', 'sequence', 'year', 'month', 'day', 'hour', 'minute', 'second', 'y', 'from_source_domain']
+resolved_sequence_index=1
+resolved_camera_index=0
+resolved_datetime_index=None
+sample_metadata_rows=[[0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1], [0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1], [0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1]]
+IWildCamVal features: 100%|██████████| 59/59 [03:00<00:00,  3.06s/it]
+
+=== Tail Cache Ablation Selection on Validation ===
+| Rank | Head              | Scale | K | Seq eta | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |
+| ---- | ----------------- | ----- | - | ------- | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |
+| 1    | prototype         | 50    | 1 | 0.5     | 0    | 0          | margin   | 0.25     | N/A          | 0.4193 | 61.09% | 41.93%   |
+| 2    | prototype_tau     | 50    | 1 | 0.5     | 0    | 0          | margin   | 0.25     | N/A          | 0.4193 | 61.09% | 41.93%   |
+| 3    | prototype         | 50    | 1 | 0.5     | 0    | 0          | entropy  | 1        | N/A          | 0.4192 | 61.15% | 41.92%   |
+| 4    | prototype_tau     | 50    | 1 | 0.5     | 0    | 0          | entropy  | 1        | N/A          | 0.4192 | 61.15% | 41.92%   |
+| 5    | prototype         | 50    | 8 | 0.5     | 0    | 0          | entropy  | 1        | N/A          | 0.4186 | 58.56% | 41.86%   |
+| 6    | prototype_tau     | 50    | 8 | 0.5     | 0    | 0          | entropy  | 1        | N/A          | 0.4186 | 58.56% | 41.86%   |
+| 7    | prototype         | 50    | 1 | 0.5     | 0    | 0          | margin   | 1        | N/A          | 0.4179 | 60.38% | 41.79%   |
+| 8    | prototype_tau     | 50    | 1 | 0.5     | 0    | 0          | margin   | 1        | N/A          | 0.4179 | 60.38% | 41.79%   |
+| 9    | prototype         | 50    | 1 | 0.5     | 0    | 0          | none     | 0        | N/A          | 0.4158 | 61.31% | 41.58%   |
+| 10   | prototype         | 50    | 1 | 0.5     | 0    | 0          | none     | 0.25     | N/A          | 0.4158 | 61.31% | 41.58%   |
+| 11   | prototype         | 50    | 1 | 0.5     | 0    | 0          | none     | 1        | N/A          | 0.4158 | 61.31% | 41.58%   |
+| 12   | prototype         | 50    | 1 | 0.5     | 0    | 0          | margin   | 0        | N/A          | 0.4158 | 61.31% | 41.58%   |
+| 13   | prototype         | 50    | 1 | 0.5     | 0    | 0          | entropy  | 0        | N/A          | 0.4158 | 61.31% | 41.58%   |
+| 14   | prototype_tau     | 50    | 1 | 0.5     | 0    | 0          | none     | 0        | N/A          | 0.4158 | 61.31% | 41.58%   |
+| 15   | prototype_tau     | 50    | 1 | 0.5     | 0    | 0          | none     | 0.25     | N/A          | 0.4158 | 61.31% | 41.58%   |
+| 16   | prototype_tau     | 50    | 1 | 0.5     | 0    | 0          | none     | 1        | N/A          | 0.4158 | 61.31% | 41.58%   |
+
+=== Best by Ablation Head ===
+| Head              | Scale | K | Seq eta | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |
+| ----------------- | ----- | - | ------- | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |
+| default           | 0     | 1 | 0       | 0    | 0          | none     | 0        | N/A          | 0.3694 | 54.31% | 36.94%   |
+| prototype         | 50    | 1 | 0.5     | 0    | 0          | margin   | 0.25     | N/A          | 0.4193 | 61.09% | 41.93%   |
+| prototype_tau     | 50    | 1 | 0.5     | 0    | 0          | margin   | 0.25     | N/A          | 0.4193 | 61.09% | 41.93%   |
+Evaluating tail cache on IWildCamIDVal...
+
+=== Metadata Audit: IWildCamIDVal ===
+metadata_fields=['location', 'sequence', 'year', 'month', 'day', 'hour', 'minute', 'second', 'y', 'from_source_domain']
+resolved_sequence_index=1
+resolved_camera_index=0
+resolved_datetime_index=None
+sample_metadata_rows=[[0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1], [0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1], [0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1]]
+IWildCamIDVal features: 100%|██████████| 29/29 [01:30<00:00,  3.11s/it]
+  IWildCamIDVal default Top-1 accuracy: 0.7655
+  IWildCamIDVal default F1-macro_all: 0.4489
+  IWildCamIDVal prototype Top-1 accuracy: 0.7959
+  IWildCamIDVal prototype F1-macro_all: 0.5053
+  IWildCamIDVal prototype_tau Top-1 accuracy: 0.7959
+  IWildCamIDVal prototype_tau F1-macro_all: 0.5053
+Evaluating tail cache on IWildCamVal...
+  IWildCamVal default Top-1 accuracy: 0.5431
+  IWildCamVal default F1-macro_all: 0.3694
+  IWildCamVal prototype Top-1 accuracy: 0.6109
+  IWildCamVal prototype F1-macro_all: 0.4193
+  IWildCamVal prototype_tau Top-1 accuracy: 0.6109
+  IWildCamVal prototype_tau F1-macro_all: 0.4193
+Evaluating tail cache on IWildCamID...
+
+=== Metadata Audit: IWildCamID ===
+metadata_fields=['location', 'sequence', 'year', 'month', 'day', 'hour', 'minute', 'second', 'y', 'from_source_domain']
+resolved_sequence_index=1
+resolved_camera_index=0
+resolved_datetime_index=None
+sample_metadata_rows=[[0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1], [0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1], [0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1]]
+IWildCamID features: 100%|██████████| 32/32 [01:39<00:00,  3.12s/it]
+  IWildCamID default Top-1 accuracy: 0.7015
+  IWildCamID default F1-macro_all: 0.4765
+  IWildCamID prototype Top-1 accuracy: 0.7458
+  IWildCamID prototype F1-macro_all: 0.5441
+  IWildCamID prototype_tau Top-1 accuracy: 0.7458
+  IWildCamID prototype_tau F1-macro_all: 0.5441
+Evaluating tail cache on IWildCamOOD...
+
+=== Metadata Audit: IWildCamOOD ===
+metadata_fields=['location', 'sequence', 'year', 'month', 'day', 'hour', 'minute', 'second', 'y', 'from_source_domain']
+resolved_sequence_index=1
+resolved_camera_index=0
+resolved_datetime_index=None
+sample_metadata_rows=[[0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1], [0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1], [0, 30191, 2014, 6, 9, 9, 32, 3, 0, 1]]
+IWildCamOOD features: 100%|██████████| 168/168 [08:27<00:00,  3.02s/it]
+  IWildCamOOD default Top-1 accuracy: 0.7012
+  IWildCamOOD default F1-macro_all: 0.3174
+  IWildCamOOD prototype Top-1 accuracy: 0.7573
+  IWildCamOOD prototype F1-macro_all: 0.3801
+  IWildCamOOD prototype_tau Top-1 accuracy: 0.7573
+  IWildCamOOD prototype_tau F1-macro_all: 0.3801
+
+=== Tail Cache Summary ===
+| Split         | Head          | Top-1  | F1-macro |
+| ------------- | ------------- | ------ | -------- |
+| IWildCamIDVal | default       | 76.55% | 44.89%   |
+| IWildCamIDVal | prototype     | 79.59% | 50.53%   |
+| IWildCamIDVal | prototype_tau | 79.59% | 50.53%   |
+| IWildCamVal   | default       | 54.31% | 36.94%   |
+| IWildCamVal   | prototype     | 61.09% | 41.93%   |
+| IWildCamVal   | prototype_tau | 61.09% | 41.93%   |
+| IWildCamID    | default       | 70.15% | 47.65%   |
+| IWildCamID    | prototype     | 74.58% | 54.41%   |
+| IWildCamID    | prototype_tau | 74.58% | 54.41%   |
+| IWildCamOOD   | default       | 70.12% | 31.74%   |
+| IWildCamOOD   | prototype     | 75.73% | 38.01%   |
+| IWildCamOOD   | prototype_tau | 75.73% | 38.01%   |
+
+=== Key STMP Final Ablation Candidates ===
+| Split         | Candidate        | K | Seq eta | Gate   | Strength | Val F1 | Top-1  | F1-macro |
+| ------------- | ---------------- | - | ------- | ------ | -------- | ------ | ------ | -------- |
+| IWildCamIDVal | tpa_baseline     | 1 | 0       | none   | 0        | 39.60% | 76.25% | 48.09%   |
+| IWildCamIDVal | sequence_only    | 1 | 0.5     | none   | 0        | 41.58% | 79.66% | 50.37%   |
+| IWildCamIDVal | selected_gate    | 1 | 0.5     | margin | 0.25     | 41.93% | 79.59% | 50.53%   |
+| IWildCamIDVal | multiproto_sanity | 8 | 0.5     | entropy | 1        | 41.86% | 78.68% | 47.40%   |
+| IWildCamVal   | tpa_baseline     | 1 | 0       | none   | 0        | 39.60% | 57.22% | 39.60%   |
+| IWildCamVal   | sequence_only    | 1 | 0.5     | none   | 0        | 41.58% | 61.31% | 41.58%   |
+| IWildCamVal   | selected_gate    | 1 | 0.5     | margin | 0.25     | 41.93% | 61.09% | 41.93%   |
+| IWildCamVal   | multiproto_sanity | 8 | 0.5     | entropy | 1        | 41.86% | 58.56% | 41.86%   |
+| IWildCamID    | tpa_baseline     | 1 | 0       | none   | 0        | 39.60% | 70.70% | 51.41%   |
+| IWildCamID    | sequence_only    | 1 | 0.5     | none   | 0        | 41.58% | 74.79% | 54.61%   |
+| IWildCamID    | selected_gate    | 1 | 0.5     | margin | 0.25     | 41.93% | 74.58% | 54.41%   |
+| IWildCamID    | multiproto_sanity | 8 | 0.5     | entropy | 1        | 41.86% | 72.60% | 49.04%   |
+| IWildCamOOD   | tpa_baseline     | 1 | 0       | none   | 0        | 39.60% | 72.20% | 36.11%   |
+| IWildCamOOD   | sequence_only    | 1 | 0.5     | none   | 0        | 41.58% | 75.88% | 37.98%   |
+| IWildCamOOD   | selected_gate    | 1 | 0.5     | margin | 0.25     | 41.93% | 75.73% | 38.01%   |
+| IWildCamOOD   | multiproto_sanity | 8 | 0.5     | entropy | 1        | 41.86% | 69.85% | 36.07%   |

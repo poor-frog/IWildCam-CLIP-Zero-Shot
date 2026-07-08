@@ -34,10 +34,10 @@ Task 7 did not run new experiments. Tasks 1-6 evidence establishes split access,
 
 ## Current promoted ViT-B/16 method
 
-The current promoted ViT-B/16 method is **STMP-Adapter** on top of the
-`flyp_nodrm_wise_vitb16_iwildcamval_best.pt` checkpoint. It is selected on
-`IWildCamVal` and reported on final splits without using `IWildCamOOD` for
-hyperparameter selection.
+The current promoted ViT-B/16 method claim is **STMP-Adapter sequence-only** on
+top of the `flyp_nodrm_wise_vitb16_iwildcamval_best.pt` checkpoint. It is
+selected on `IWildCamVal` and reported on final splits without using
+`IWildCamOOD` for hyperparameter selection.
 
 Evidence file:
 
@@ -48,7 +48,15 @@ outputs/stmp_adapter_kaggle_2026-07-08.md
 | Method | IWildCamVal F1 | IWildCamIDVal F1 | IWildCamID F1 | IWildCamOOD F1 |
 | ------ | -------------- | ---------------- | ------------- | -------------- |
 | FLYP + WiSE default logits | 36.94% | 44.89% | 47.65% | 31.74% |
-| STMP-Adapter | 41.93% | 50.53% | 54.41% | 38.01% |
+| FLYP + Tail Prototype Adapter | 39.60% | 48.09% | 51.41% | 36.11% |
+| STMP-Adapter sequence-only | 41.58% | 50.37% | 54.61% | 37.98% |
+| STMP-Adapter selected-gate ablation | 41.93% | 50.53% | 54.41% | 38.01% |
+| STMP-Adapter multi-prototype sanity | 41.86% | 47.40% | 49.04% | 36.07% |
+
+Main claim: sequence consensus accounts for nearly all OOD improvement over
+TPA. The selected confidence gate is a minor ablation (`37.98%` to `38.01%`
+OOD F1), and `K=8` multi-prototype scoring is not a positive result in the
+current ViT-B/16 setting.
 
 ## CoOp Phase 1.1 baseline documented in PoorFrogs
 
