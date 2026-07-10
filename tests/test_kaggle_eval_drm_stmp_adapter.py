@@ -47,6 +47,7 @@ class KaggleEvalDrmStmpAdapterTest(unittest.TestCase):
                 launcher.main()
 
         command = captured[-1]
+        self.assertIn("--template=iwildcam_drm_template", command)
         self.assertIn(f"--cd-path={concept_path}", command)
         self.assertIn("--concept-beta-grid=0.5", command)
         self.assertIn("--prototype-scale-grid=0", command)

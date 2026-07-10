@@ -234,7 +234,7 @@ def main():
         "--train-dataset=IWildCam",
         "--val-dataset=IWildCamVal",
         "--eval-datasets=IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
-        "--template=iwildcam_template",
+        "--template=iwildcam_drm_template",
         f"--data-location={data_location}",
         f"--load={converted_checkpoint}",
         f"--cd-path={concept_path}",
