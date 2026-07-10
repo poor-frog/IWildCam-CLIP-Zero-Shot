@@ -17,7 +17,7 @@ class KaggleEvalDrmStmpAdapterTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "src/eval_drm_blend.py"):
                 launcher.assert_repo_supports_drm_concept_eval(Path(tmpdir))
 
-    def test_main_builds_official_drm_concept_parity_command(self):
+    def test_main_builds_drm_stmp_command(self):
         import kaggle_eval_drm_stmp_adapter as launcher
 
         captured = []
@@ -50,10 +50,10 @@ class KaggleEvalDrmStmpAdapterTest(unittest.TestCase):
         self.assertIn("--template=iwildcam_drm_template", command)
         self.assertIn(f"--cd-path={concept_path}", command)
         self.assertIn("--concept-beta-grid=0.5", command)
-        self.assertIn("--prototype-scale-grid=0", command)
-        self.assertIn("--sequence-consensus-grid=0", command)
+        self.assertIn("--prototype-scale-grid=50", command)
+        self.assertIn("--sequence-consensus-grid=0,0.5", command)
         self.assertIn("--multi-prototype-k-grid=1", command)
-        self.assertIn("--wandb-run-name=drm-official-vitb16-concept-parity-iwildcamval", command)
+        self.assertIn("--wandb-run-name=drm-stmp-adapter-scale50-seq0-0p5-vitb16-iwildcamval", command)
 
 
 if __name__ == "__main__":

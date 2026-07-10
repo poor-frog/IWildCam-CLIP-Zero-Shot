@@ -13,19 +13,19 @@ DEFAULT_IWILDCAM_CANDIDATES = (
     Path("/kaggle/input/datasets/thanhquang71/iwildcam-v2-0-2020-wilds-dataset"),
 )
 DRM_CHECKPOINT_NAME = os.environ.get("DRM_CHECKPOINT_NAME", "iwildcam_vit_b16.pt")
-PROTOTYPE_SCALE_GRID = os.environ.get("DRM_STMP_PROTOTYPE_SCALE_GRID", "0")
+PROTOTYPE_SCALE_GRID = os.environ.get("DRM_STMP_PROTOTYPE_SCALE_GRID", "50")
 CONCEPT_BETA_GRID = os.environ.get("DRM_STMP_CONCEPT_BETA_GRID", "0.5")
 TAIL_GAMMA_GRID = os.environ.get("DRM_STMP_TAIL_GAMMA_GRID", "0")
 GATE_MODE_GRID = os.environ.get("DRM_STMP_GATE_MODE_GRID", "none")
 GATE_STRENGTH_GRID = os.environ.get("DRM_STMP_GATE_STRENGTH_GRID", "0")
-SEQUENCE_CONSENSUS_GRID = os.environ.get("DRM_STMP_SEQUENCE_CONSENSUS_GRID", "0")
+SEQUENCE_CONSENSUS_GRID = os.environ.get("DRM_STMP_SEQUENCE_CONSENSUS_GRID", "0,0.5")
 MULTI_PROTOTYPE_K_GRID = os.environ.get("DRM_STMP_MULTI_PROTOTYPE_K_GRID", "1")
 MULTI_PROTOTYPE_REDUCTION = os.environ.get("DRM_STMP_MULTI_PROTOTYPE_REDUCTION", "max")
 BATCH_SIZE = os.environ.get("DRM_STMP_BATCH_SIZE", "256")
 WORKERS = os.environ.get("DRM_STMP_WORKERS", "2")
 WANDB_RUN_NAME = os.environ.get(
     "DRM_STMP_WANDB_RUN_NAME",
-    "drm-official-vitb16-concept-parity-iwildcamval",
+    "drm-stmp-adapter-scale50-seq0-0p5-vitb16-iwildcamval",
 )
 
 
