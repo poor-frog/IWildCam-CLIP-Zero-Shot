@@ -1,7 +1,7 @@
 {
-  "id": "klinh1912/poorfrogs-flyp-vitl14-iwildcam",
-  "title": "poorfrogs-flyp-vitl14-iwildcam",
-  "code_file": "kaggle_train_flyp_vitl14.py",
+  "id": "huyphmhakq/poorfrogs-drm-stmp-iwildcam",
+  "title": "poorfrogs-drm-stmp-iwildcam",
+  "code_file": "kaggle_eval_drm_stmp_adapter.py",
   "language": "python",
   "kernel_type": "script",
   "is_private": true,
@@ -10,7 +10,8 @@
   "enable_internet": true,
   "machine_shape": "NvidiaTeslaT4",
   "dataset_sources": [
-    "thanhquang71/iwildcam-v2-0-2020-wilds-dataset"
+    "thanhquang71/iwildcam-v2-0-2020-wilds-dataset",
+    "klinh1912/drm-iwildcam-vitb16-checkpoint"
   ],
   "competition_sources": [],
   "kernel_sources": [],
