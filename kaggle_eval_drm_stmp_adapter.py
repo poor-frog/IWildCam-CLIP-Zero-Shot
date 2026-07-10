@@ -18,14 +18,14 @@ CONCEPT_BETA_GRID = os.environ.get("DRM_STMP_CONCEPT_BETA_GRID", "0.5")
 TAIL_GAMMA_GRID = os.environ.get("DRM_STMP_TAIL_GAMMA_GRID", "0")
 GATE_MODE_GRID = os.environ.get("DRM_STMP_GATE_MODE_GRID", "none")
 GATE_STRENGTH_GRID = os.environ.get("DRM_STMP_GATE_STRENGTH_GRID", "0")
-SEQUENCE_CONSENSUS_GRID = os.environ.get("DRM_STMP_SEQUENCE_CONSENSUS_GRID", "0,0.5")
-MULTI_PROTOTYPE_K_GRID = os.environ.get("DRM_STMP_MULTI_PROTOTYPE_K_GRID", "1")
+SEQUENCE_CONSENSUS_GRID = os.environ.get("DRM_STMP_SEQUENCE_CONSENSUS_GRID", "0,0.25,0.5")
+MULTI_PROTOTYPE_K_GRID = os.environ.get("DRM_STMP_MULTI_PROTOTYPE_K_GRID", "1,2,4,8")
 MULTI_PROTOTYPE_REDUCTION = os.environ.get("DRM_STMP_MULTI_PROTOTYPE_REDUCTION", "max")
 BATCH_SIZE = os.environ.get("DRM_STMP_BATCH_SIZE", "256")
 WORKERS = os.environ.get("DRM_STMP_WORKERS", "2")
 WANDB_RUN_NAME = os.environ.get(
     "DRM_STMP_WANDB_RUN_NAME",
-    "drm-stmp-adapter-scale50-seq0-0p5-vitb16-iwildcamval",
+    "drm-stmp-multiprototype-k1-2-4-8-seq0-0p25-0p5-vitb16-iwildcamval",
 )
 
 

@@ -51,9 +51,9 @@ class KaggleEvalDrmStmpAdapterTest(unittest.TestCase):
         self.assertIn(f"--cd-path={concept_path}", command)
         self.assertIn("--concept-beta-grid=0.5", command)
         self.assertIn("--prototype-scale-grid=50", command)
-        self.assertIn("--sequence-consensus-grid=0,0.5", command)
-        self.assertIn("--multi-prototype-k-grid=1", command)
-        self.assertIn("--wandb-run-name=drm-stmp-adapter-scale50-seq0-0p5-vitb16-iwildcamval", command)
+        self.assertIn("--sequence-consensus-grid=0,0.25,0.5", command)
+        self.assertIn("--multi-prototype-k-grid=1,2,4,8", command)
+        self.assertIn("--wandb-run-name=drm-stmp-multiprototype-k1-2-4-8-seq0-0p25-0p5-vitb16-iwildcamval", command)
 
 
 if __name__ == "__main__":
