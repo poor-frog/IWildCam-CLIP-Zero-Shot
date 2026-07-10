@@ -19,22 +19,26 @@ TAIL_GAMMA_GRID = os.environ.get("DRM_STMP_TAIL_GAMMA_GRID", "0")
 GATE_MODE_GRID = os.environ.get("DRM_STMP_GATE_MODE_GRID", "none")
 GATE_STRENGTH_GRID = os.environ.get("DRM_STMP_GATE_STRENGTH_GRID", "0")
 SEQUENCE_CONSENSUS_GRID = os.environ.get("DRM_STMP_SEQUENCE_CONSENSUS_GRID", "0,0.25,0.5")
-MULTI_PROTOTYPE_K_GRID = os.environ.get("DRM_STMP_MULTI_PROTOTYPE_K_GRID", "1,2,4,8")
+MULTI_PROTOTYPE_K_GRID = os.environ.get("DRM_STP_MULTI_PROTOTYPE_K_GRID", "1")
 MULTI_PROTOTYPE_REDUCTION = os.environ.get("DRM_STMP_MULTI_PROTOTYPE_REDUCTION", "max")
 BATCH_SIZE = os.environ.get("DRM_STMP_BATCH_SIZE", "256")
 WORKERS = os.environ.get("DRM_STMP_WORKERS", "2")
+STP_DIAGNOSTICS_REPORT = os.environ.get(
+    "DRM_STP_DIAGNOSTICS_REPORT",
+    "/kaggle/working/stp_diagnostics_iwildcamood.md",
+)
+STP_DIAGNOSTICS_BOOTSTRAP_SAMPLES = os.environ.get("DRM_STP_DIAGNOSTICS_BOOTSTRAP_SAMPLES", "1000")
 WANDB_RUN_NAME = os.environ.get(
-    "DRM_STMP_WANDB_RUN_NAME",
-    "drm-stmp-multiprototype-k1-2-4-8-seq0-0p25-0p5-vitb16-iwildcamval",
+    "DRM_STP_WANDB_RUN_NAME",
+    "drm-stp-diagnostics-k1-seq0-0p25-0p5-vitb16-iwildcamval",
 )
 
 
 class DrmConceptEvalSupportError(RuntimeError):
     pass
 
-# Optional private-kernel fallback when Kaggle secrets are unavailable.
-# Paste your W&B key here before `kaggle kernels push -p .`, then clear it before
-# any GitHub commit/push.
+
+# Optional private-kernel fallback. Keep empty in Git; Kaggle Secret/env wins.
 HARDCODED_WANDB_API_KEY = ""
 WANDB_SECRET_NAMES = ("WANDB_API_KEY", "wandb-api-key", "wandb_api_key", "WANDB-API-KEY")
 
@@ -185,9 +189,6 @@ def patch_iwildcam_val():
 
 
 def configure_wandb():
-    if HARDCODED_WANDB_API_KEY:
-        os.environ["WANDB_API_KEY"] = HARDCODED_WANDB_API_KEY
-        return True
     for secret_name in WANDB_SECRET_NAMES:
         secret_value = os.environ.get(secret_name)
         if secret_value:
@@ -196,16 +197,21 @@ def configure_wandb():
     try:
         from kaggle_secrets import UserSecretsClient
     except ImportError:
-        return False
-    secrets_client = UserSecretsClient()
-    for secret_name in WANDB_SECRET_NAMES:
-        try:
-            secret_value = secrets_client.get_secret(secret_name)
-        except Exception:  # noqa: BROAD_EXCEPT_OK - Kaggle secret lookup has no stable missing-secret exception.
-            continue
-        if secret_value:
-            os.environ["WANDB_API_KEY"] = secret_value
-            return True
+        secrets_client = None
+    else:
+        secrets_client = UserSecretsClient()
+    if secrets_client is not None:
+        for secret_name in WANDB_SECRET_NAMES:
+            try:
+                secret_value = secrets_client.get_secret(secret_name)
+            except Exception:  # noqa: BROAD_EXCEPT_OK - Kaggle secret lookup has no stable missing-secret exception.
+                continue
+            if secret_value:
+                os.environ["WANDB_API_KEY"] = secret_value
+                return True
+    if HARDCODED_WANDB_API_KEY:
+        os.environ["WANDB_API_KEY"] = HARDCODED_WANDB_API_KEY
+        return True
     return False
 
 
@@ -214,14 +220,12 @@ def main():
     repo_root = clone_or_update(DEFAULT_GITHUB_REPO, DEFAULT_KAGGLE_WORKING_REPO)
     drm_repo = clone_or_update(DEFAULT_DRM_GITHUB_REPO, DEFAULT_DRM_REPO)
     configure_import_path(repo_root)
-    assert_repo_supports_drm_concept_eval(repo_root)
     ensure_local_package_installed(repo_root)
     patch_tail_cache_eval_guard(repo_root)
     patch_iwildcam_val()
 
     data_location = prepare_iwildcam_layout(repo_root)
     drm_checkpoint = find_drm_checkpoint()
-    concept_path = drm_repo / "prompts" / "iwildcam_cd.json"
     state_dict_path = Path("/kaggle/working/drm_iwildcam_vit_b16_state_dict.pt")
     converted_checkpoint = Path("/kaggle/working/drm_iwildcam_vit_b16_poorfrogs_clip_encoder.pt")
     export_drm_state_dict(drm_repo, drm_checkpoint, state_dict_path)
@@ -237,8 +241,6 @@ def main():
         "--template=iwildcam_drm_template",
         f"--data-location={data_location}",
         f"--load={converted_checkpoint}",
-        f"--cd-path={concept_path}",
-        f"--concept-beta-grid={CONCEPT_BETA_GRID}",
         f"--prototype-scale-grid={PROTOTYPE_SCALE_GRID}",
         "--cache-tau-grid=0",
         f"--tail-gamma-grid={TAIL_GAMMA_GRID}",
@@ -250,6 +252,9 @@ def main():
         f"--multi-prototype-reduction={MULTI_PROTOTYPE_REDUCTION}",
         "--audit-metadata",
         "--report-key-ablation-candidates",
+        f"--stp-diagnostics-report={STP_DIAGNOSTICS_REPORT}",
+        "--stp-diagnostics-split=IWildCamOOD",
+        f"--stp-diagnostics-bootstrap-samples={STP_DIAGNOSTICS_BOOTSTRAP_SAMPLES}",
         "--max-cache-examples-per-class=0",
         f"--batch-size={BATCH_SIZE}",
         f"--workers={WORKERS}",
@@ -263,7 +268,7 @@ def main():
         ])
     else:
         command.append("--no-wandb")
-    print("Running official DRM concept-description parity evaluation:")
+    print("Running DRM + STP diagnostic evaluation:")
     print(" ".join(str(part) for part in command))
     run(command, cwd=repo_root)
 

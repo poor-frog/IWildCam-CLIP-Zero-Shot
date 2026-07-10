@@ -295,13 +295,25 @@ class FlypModuleTest(unittest.TestCase):
         rows = [
             row(0.0, 1, "none", 0.0),
             row(0.5, 1, "none", 0.0),
-            row(0.5, 1, "margin", 0.25),
-            row(0.5, 8, "entropy", 1.0),
+            row(0.5, 2, "none", 0.0),
+            row(0.5, 4, "none", 0.0),
+            row(0.5, 8, "none", 0.0),
         ]
 
         labels = [label for label, _ in find_key_ablation_rows(rows)]
 
-        self.assertEqual(labels, ["tpa_baseline", "sequence_only", "selected_gate", "multiproto_sanity"])
+        self.assertEqual(labels, ["tpa_baseline", "sequence_only", "multiproto_k2", "multiproto_k4", "multiproto_k8"])
+
+    def test_select_preferred_head_uses_highest_validation_score(self):
+        from src.eval_tail_cache import select_preferred_head
+
+        best_by_head = {
+            "default": {"score": 0.39},
+            "prototype": {"score": 0.42},
+            "concept_prototype": {"score": 0.41},
+        }
+
+        self.assertEqual(select_preferred_head(best_by_head), "prototype")
 
     def test_concept_candidate_includes_shared_adapter_fields(self):
         from src.eval_tail_cache import make_candidate_rows

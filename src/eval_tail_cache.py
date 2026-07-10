@@ -2,6 +2,7 @@ import argparse
 import copy
 import os
 import random
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -23,6 +24,7 @@ from src.models.stmp_adapter import (
     print_metadata_audit,
     resolve_metadata_field_index,
 )
+from src.models.stp_diagnostics import build_stp_diagnostics
 from src.models.tail_prototype import apply_tail_class_weights, tail_class_weights
 from src.train_coop import build_eval_dataset, log_wandb_summary
 from src.train_flyp import clone_state_dict, ensure_open_clip_for_flyp
@@ -72,6 +74,9 @@ def parse_arguments():
     parser.add_argument("--multi-prototype-reduction", type=str, default="max", choices=["max", "logsumexp"])
     parser.add_argument("--audit-metadata", action="store_true")
     parser.add_argument("--report-key-ablation-candidates", action="store_true")
+    parser.add_argument("--stp-diagnostics-report", type=str, default=None)
+    parser.add_argument("--stp-diagnostics-split", type=str, default="IWildCamOOD")
+    parser.add_argument("--stp-diagnostics-bootstrap-samples", type=int, default=1000)
     parser.add_argument("--cd-path", type=str, default=None, help="Optional DRM concept-description JSON for concept ablations.")
     parser.add_argument("--concept-beta-grid", type=str, default="0,0.25,0.5,0.75,1")
     parser.add_argument("--max-cache-examples-per-class", type=int, default=0)
@@ -295,6 +300,24 @@ def evaluate_candidate(dataset, base_logits, prototype_raw_logits_by_k, concept_
     return metrics_from_logits(dataset, predictions, labels, metadata, args)
 
 
+def write_stp_diagnostics(path, split_name, labels, frame_logits, stp_logits, train_class_counts, metadata, sequence_field_index, bootstrap_samples, seed):
+    diagnostics = build_stp_diagnostics(
+        labels=labels,
+        frame_logits=frame_logits,
+        stp_logits=stp_logits,
+        train_class_counts=train_class_counts,
+        metadata=metadata,
+        sequence_field_index=sequence_field_index,
+        bootstrap_samples=bootstrap_samples,
+        seed=seed,
+    )
+    report_path = Path(path).expanduser()
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(diagnostics.to_markdown(split_name), encoding="utf-8")
+    print(f"Saved STP diagnostics to {report_path}")
+    return diagnostics
+
+
 def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, include_concept):
     rows = [{
         "head": "default",
@@ -479,8 +502,9 @@ def find_key_ablation_rows(selection_rows):
     targets = [
         ("tpa_baseline", {"sequence_eta": 0.0, "prototype_k": 1, "gate_mode": "none", "gate_strength": 0.0}),
         ("sequence_only", {"sequence_eta": 0.5, "prototype_k": 1, "gate_mode": "none", "gate_strength": 0.0}),
-        ("selected_gate", {"sequence_eta": 0.5, "prototype_k": 1, "gate_mode": "margin", "gate_strength": 0.25}),
-        ("multiproto_sanity", {"sequence_eta": 0.5, "prototype_k": 8, "gate_mode": "entropy", "gate_strength": 1.0}),
+        ("multiproto_k2", {"sequence_eta": 0.5, "prototype_k": 2, "gate_mode": "none", "gate_strength": 0.0}),
+        ("multiproto_k4", {"sequence_eta": 0.5, "prototype_k": 4, "gate_mode": "none", "gate_strength": 0.0}),
+        ("multiproto_k8", {"sequence_eta": 0.5, "prototype_k": 8, "gate_mode": "none", "gate_strength": 0.0}),
     ]
     rows = []
     for label, target in targets:
@@ -488,6 +512,10 @@ def find_key_ablation_rows(selection_rows):
         if match is not None:
             rows.append((label, match))
     return rows
+
+
+def select_preferred_head(best_by_head):
+    return max(best_by_head.items(), key=lambda item: item[1]["score"])[0]
 
 
 def print_key_ablation_summary(summary_rows):
@@ -618,6 +646,7 @@ def main(args):
 
     summary_rows = []
     key_ablation_summary_rows = []
+    stp_diagnostics_written = False
     for dataset_name in args.eval_datasets:
         print(f"Evaluating tail cache on {dataset_name}...")
         dataset = build_eval_dataset(dataset_name, encoder, args)
@@ -640,6 +669,55 @@ def main(args):
                     reduction=args.multi_prototype_reduction,
                 )
         cd_logits = val_concept_logits if dataset_name == args.val_dataset else concept_logits(features["features"], concept_head)
+        if args.stp_diagnostics_report is not None and dataset_name == args.stp_diagnostics_split:
+            stp_row = best_by_head.get("prototype")
+            if stp_row is None:
+                raise ValueError("STP diagnostics require a selected prototype candidate.")
+            frame_row = dict(stp_row)
+            frame_row["sequence_eta"] = 0.0
+            frame_logits = build_candidate_predictions(
+                base_logits,
+                proto_logits_by_k,
+                cd_logits,
+                class_priors,
+                tail_weights_by_gamma,
+                frame_row,
+                metadata=features["metadata"],
+                sequence_field_index=sequence_field_index,
+            )
+            stp_logits = build_candidate_predictions(
+                base_logits,
+                proto_logits_by_k,
+                cd_logits,
+                class_priors,
+                tail_weights_by_gamma,
+                stp_row,
+                metadata=features["metadata"],
+                sequence_field_index=sequence_field_index,
+            )
+            diagnostics = write_stp_diagnostics(
+                args.stp_diagnostics_report,
+                dataset_name,
+                features["labels"],
+                frame_logits,
+                stp_logits,
+                counts,
+                features["metadata"],
+                sequence_field_index,
+                args.stp_diagnostics_bootstrap_samples,
+                args.seed,
+            )
+            stp_diagnostics_written = True
+            if wandb is not None:
+                wandb.log({
+                    f"stp_diagnostics/{dataset_name}/frame_macro_f1": diagnostics.frame_macro_f1,
+                    f"stp_diagnostics/{dataset_name}/stp_macro_f1": diagnostics.stp_macro_f1,
+                    f"stp_diagnostics/{dataset_name}/delta_macro_f1": diagnostics.bootstrap.delta,
+                    f"stp_diagnostics/{dataset_name}/bootstrap_low": diagnostics.bootstrap.low,
+                    f"stp_diagnostics/{dataset_name}/bootstrap_high": diagnostics.bootstrap.high,
+                    f"stp_diagnostics/{dataset_name}/frame_wrong_stp_correct": diagnostics.frame_wrong_stp_correct,
+                    f"stp_diagnostics/{dataset_name}/frame_correct_stp_wrong": diagnostics.frame_correct_stp_wrong,
+                })
         for head_name in ("default", "prototype", "prototype_tau", "concept", "concept_prototype"):
             best = best_by_head.get(head_name)
             if best is None:
@@ -699,9 +777,13 @@ def main(args):
 
     print_tail_cache_summary(summary_rows)
     print_key_ablation_summary(key_ablation_summary_rows)
-    preferred_head = "concept_prototype" if "concept_prototype" in best_by_head else "prototype_tau"
+    if args.stp_diagnostics_report is not None and not stp_diagnostics_written:
+        raise ValueError(f"--stp-diagnostics-split={args.stp_diagnostics_split} is not in --eval-datasets.")
+    preferred_head = select_preferred_head(best_by_head)
     cache_summary_rows = [(dataset, top1, f1) for dataset, head, top1, f1 in summary_rows if head == preferred_head]
     log_wandb_summary(wandb, cache_summary_rows)
+    if wandb is not None:
+        wandb.summary["tail_cache/selected_head"] = preferred_head
     if wandb is not None:
         wandb.finish()
 
