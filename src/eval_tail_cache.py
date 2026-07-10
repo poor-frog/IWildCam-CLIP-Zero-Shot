@@ -349,6 +349,8 @@ def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mo
                 "prototype_scale": 0.0,
                 "tau": 0.0,
                 "tail_gamma": 0.0,
+                "prototype_k": 1,
+                "sequence_eta": 0.0,
                 "gate_mode": "none",
                 "gate_strength": 0.0,
                 "concept_beta": float(concept_beta),

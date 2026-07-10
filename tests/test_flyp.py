@@ -303,6 +303,25 @@ class FlypModuleTest(unittest.TestCase):
 
         self.assertEqual(labels, ["tpa_baseline", "sequence_only", "selected_gate", "multiproto_sanity"])
 
+    def test_concept_candidate_includes_shared_adapter_fields(self):
+        from src.eval_tail_cache import make_candidate_rows
+
+        rows = make_candidate_rows(
+            prototype_scale_grid=[0.0],
+            tau_grid=[0.0],
+            tail_gamma_grid=[0.0],
+            gate_mode_grid=["none"],
+            gate_strength_grid=[0.0],
+            sequence_eta_grid=[0.0],
+            prototype_k_grid=[1],
+            concept_beta_grid=[0.5],
+            include_concept=True,
+        )
+        concept_row = next(row for row in rows if row["head"] == "concept")
+
+        self.assertEqual(concept_row["prototype_k"], 1)
+        self.assertEqual(concept_row["sequence_eta"], 0.0)
+
     def test_train_flyp_one_epoch_adds_tail_prototype_auxiliary_loss(self):
         from src.models.flyp import train_flyp_one_epoch
 
