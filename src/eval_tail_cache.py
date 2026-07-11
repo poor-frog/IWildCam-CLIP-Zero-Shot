@@ -1,5 +1,6 @@
 import argparse
 import copy
+import json
 import os
 import random
 from pathlib import Path
@@ -84,6 +85,8 @@ def parse_arguments():
     parser.add_argument("--concept-beta-grid", type=str, default="0,0.25,0.5,0.75,1")
     parser.add_argument("--max-cache-examples-per-class", type=int, default=0)
     parser.add_argument("--best-metric", type=str, default="F1-macro_all")
+    parser.add_argument("--selection-output", type=str, default=None)
+    parser.add_argument("--summary-head", type=str, default=None)
     parser.add_argument("--num-ood-hp-examples", type=int, default=-1)
     parser.add_argument("--class-balanced-ood", action="store_true")
     parser.add_argument("--wandb", dest="wandb", action="store_true")
@@ -521,6 +524,18 @@ def print_selection(rows, best_by_head, limit=16):
         )
 
 
+def write_selection_output(path, val_dataset, best_metric, best_by_head):
+    output_path = Path(path).expanduser()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "val_dataset": val_dataset,
+        "best_metric": best_metric,
+        "best_by_head": best_by_head,
+    }
+    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    print(f"Saved validation selection to {output_path}")
+
+
 def print_tail_cache_summary(summary_rows):
     print("\n=== Tail Cache Summary ===")
     print("| Split         | Head          | Top-1  | F1-macro |")
@@ -562,6 +577,14 @@ def find_key_ablation_rows(selection_rows):
 
 def select_preferred_head(best_by_head):
     return max(best_by_head.items(), key=lambda item: item[1]["score"])[0]
+
+
+def select_summary_head(best_by_head, requested_head):
+    if requested_head is None:
+        return select_preferred_head(best_by_head)
+    if requested_head not in best_by_head:
+        raise ValueError(f"--summary-head={requested_head!r} has no selected candidate.")
+    return requested_head
 
 
 def print_key_ablation_summary(summary_rows):
@@ -692,6 +715,8 @@ def main(args):
         sequence_field_index=sequence_field_index,
     )
     print_selection(selection_rows, best_by_head)
+    if args.selection_output is not None:
+        write_selection_output(args.selection_output, args.val_dataset, args.best_metric, best_by_head)
     key_ablation_rows = find_key_ablation_rows(selection_rows) if args.report_key_ablation_candidates else []
 
     summary_rows = []
@@ -831,7 +856,7 @@ def main(args):
     print_key_ablation_summary(key_ablation_summary_rows)
     if args.stp_diagnostics_report is not None and not stp_diagnostics_written:
         raise ValueError(f"--stp-diagnostics-split={args.stp_diagnostics_split} is not in --eval-datasets.")
-    preferred_head = select_preferred_head(best_by_head)
+    preferred_head = select_summary_head(best_by_head, args.summary_head)
     cache_summary_rows = [(dataset, top1, f1) for dataset, head, top1, f1 in summary_rows if head == preferred_head]
     log_wandb_summary(wandb, cache_summary_rows)
     if wandb is not None:

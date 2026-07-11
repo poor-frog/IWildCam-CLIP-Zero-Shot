@@ -30,6 +30,9 @@ STP_DIAGNOSTICS_REPORT = os.environ.get(
 STP_DIAGNOSTICS_BOOTSTRAP_SAMPLES = os.environ.get("DRM_STP_DIAGNOSTICS_BOOTSTRAP_SAMPLES", "1000")
 SCTR_STRENGTH_GRID = os.environ.get("DRM_SCTR_STRENGTH_GRID", "0.25,0.5,1")
 SCTR_TAIL_PROTECTION_GRID = os.environ.get("DRM_SCTR_TAIL_PROTECTION_GRID", "0,0.5,1,2")
+WISE_ALPHA_GRID = os.environ.get("DRM_WISE_ALPHA_GRID", "")
+WISE_SELECTION_DIR = os.environ.get("DRM_WISE_SELECTION_DIR", "/kaggle/working/drm_wise_stp_selection")
+WISE_WANDB_RUN_PREFIX = os.environ.get("DRM_WISE_WANDB_RUN_PREFIX", "drm-wise-stp-vitb16-iwildcamval")
 WANDB_RUN_NAME = os.environ.get(
     "DRM_SCTR_WANDB_RUN_NAME",
     "drm-sctr-v1-route0p25-0p5-1-tail0-0p5-1-2-vitb16-iwildcamval",
@@ -101,6 +104,15 @@ def assert_repo_supports_drm_concept_eval(repo_root):
         raise DrmConceptEvalSupportError(
             "The cloned repo lacks src/eval_drm_blend.py required by --cd-path. "
             "Push the DRM concept-evaluation helper to origin/main before rerunning."
+        )
+
+
+def assert_repo_supports_drm_wise_stp_eval(repo_root):
+    driver_path = Path(repo_root) / "src" / "eval_drm_wise_stp.py"
+    evaluator_path = Path(repo_root) / "src" / "eval_tail_cache.py"
+    if not driver_path.is_file() or "--selection-output" not in evaluator_path.read_text(encoding="utf-8"):
+        raise DrmConceptEvalSupportError(
+            "The cloned repo lacks the DRM + WiSE + STP selection driver. Push the latest code before rerunning."
         )
 
 
@@ -225,6 +237,8 @@ def main():
     ensure_local_package_installed(repo_root)
     patch_tail_cache_eval_guard(repo_root)
     patch_iwildcam_val()
+    if WISE_ALPHA_GRID:
+        assert_repo_supports_drm_wise_stp_eval(repo_root)
 
     data_location = prepare_iwildcam_layout(repo_root)
     drm_checkpoint = find_drm_checkpoint()
@@ -261,15 +275,42 @@ def main():
         f"--workers={WORKERS}",
         "--device=auto",
     ]
+    if WISE_ALPHA_GRID:
+        command = [
+            sys.executable,
+            "src/eval_drm_wise_stp.py",
+            "--model=ViT-B/16",
+            "--train-dataset=IWildCam",
+            "--val-dataset=IWildCamVal",
+            "--template=iwildcam_drm_template",
+            f"--data-location={data_location}",
+            f"--load={converted_checkpoint}",
+            f"--wise-alpha-grid={WISE_ALPHA_GRID}",
+            f"--prototype-scale-grid={PROTOTYPE_SCALE_GRID}",
+            "--cache-tau-grid=0",
+            f"--tail-gamma-grid={TAIL_GAMMA_GRID}",
+            f"--gate-mode-grid={GATE_MODE_GRID}",
+            f"--gate-strength-grid={GATE_STRENGTH_GRID}",
+            f"--sequence-consensus-grid={SEQUENCE_CONSENSUS_GRID}",
+            "--sequence-id-field=auto",
+            f"--multi-prototype-k-grid={MULTI_PROTOTYPE_K_GRID}",
+            f"--multi-prototype-reduction={MULTI_PROTOTYPE_REDUCTION}",
+            f"--batch-size={BATCH_SIZE}",
+            f"--workers={WORKERS}",
+            "--device=auto",
+            "--best-metric=F1-macro_all",
+            f"--selection-dir={WISE_SELECTION_DIR}",
+            f"--wandb-run-prefix={WISE_WANDB_RUN_PREFIX}",
+            "--audit-metadata",
+        ]
     if configure_wandb():
-        command.extend([
-            "--wandb",
-            "--wandb-project=PoorFrogs",
-            f"--wandb-run-name={WANDB_RUN_NAME}",
-        ])
+        command.extend(["--wandb", "--wandb-project=PoorFrogs"])
+        if not WISE_ALPHA_GRID:
+            command.append(f"--wandb-run-name={WANDB_RUN_NAME}")
     else:
         command.append("--no-wandb")
-    print("Running DRM + SCTR validation-selected evaluation:")
+    mode_name = "DRM + WiSE + STP two-phase evaluation" if WISE_ALPHA_GRID else "DRM + SCTR validation-selected evaluation"
+    print(f"Running {mode_name}:")
     print(" ".join(str(part) for part in command))
     run(command, cwd=repo_root)
 
