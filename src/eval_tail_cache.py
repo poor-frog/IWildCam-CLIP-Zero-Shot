@@ -55,6 +55,7 @@ def parse_arguments():
     parser.add_argument("--eval-datasets", type=lambda value: value.split(","), required=True)
     parser.add_argument("--template", type=str, default="iwildcam_template")
     parser.add_argument("--data-location", type=str, default="~/data")
+    parser.add_argument("--cache-dir", type=str, default=None)
     parser.add_argument("--load", type=str, required=True)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--workers", type=int, default=4)

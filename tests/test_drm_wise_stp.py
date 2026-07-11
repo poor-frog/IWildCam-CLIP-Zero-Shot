@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 
@@ -61,3 +62,15 @@ def test_requested_summary_head_overrides_global_best_head():
     }
 
     assert select_summary_head(best_by_head, "prototype") == "prototype"
+
+
+def test_tail_cache_parser_provides_cache_dir_for_wise_anchor(monkeypatch):
+    from src.eval_tail_cache import parse_arguments
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["eval_tail_cache.py", "--eval-datasets=IWildCamVal", "--load=checkpoint.pt", "--device=cpu"],
+    )
+
+    assert parse_arguments().cache_dir is None
