@@ -123,6 +123,11 @@ def parse_arguments():
     parser.add_argument("--tail-proto-temperature", type=float, default=1.0, help="Temperature for --tail-proto-objective=distill.")
     parser.add_argument("--tail-proto-teacher-load", type=str, default=None, help="Fixed teacher CLIPEncoder checkpoint for --tail-proto-objective=fixed_distill.")
     parser.add_argument("--tail-proto-max-batches", type=int, default=None, help="Optional cap for prototype-building batches, intended for smoke tests only.")
+    parser.add_argument("--btel-weight", type=float, default=0.0, help="Burst-aware Tail Evidence Learning auxiliary weight; 0 disables BTEL exactly.")
+    parser.add_argument("--btel-prototype-scale", type=float, default=50.0, help="Frozen prototype-logit scale used by BTEL evidence.")
+    parser.add_argument("--btel-negative-quantile", type=float, default=0.95, help="Train-only negative-burst evidence quantile used for BTEL calibration.")
+    parser.add_argument("--btel-max-frames-per-sequence", type=int, default=8, help="Maximum frames sampled from one train burst in a BTEL batch.")
+    parser.add_argument("--btel-audit-only", action="store_true", help="Print train and validation burst audits, then exit before training.")
 
     parsed_args = parser.parse_args()
     parsed_args.device = resolve_device_choice(parsed_args.device)

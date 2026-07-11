@@ -4,11 +4,14 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 
 import src.datasets as datasets
 import src.templates as templates
 from src.config import parse_arguments
 from src.models.clip_encoder import CLIPEncoder
+from src.models.btel import BurstBatchSampler
+from src.models.btel_artifacts import audit_sequences, build_btel_artifacts, print_sequence_audit, validate_btel_validation_split
 from src.models.coop import maybe_data_parallel, unwrap_model
 from src.models.flyp import eval_flyp_single_dataset, train_flyp_one_epoch, wise_interpolate_state_dict
 from src.models.tail_prototype import build_class_prototypes_from_loader
@@ -116,6 +119,88 @@ def maybe_build_tail_teacher_model(args):
     return teacher_model
 
 
+def maybe_prepare_btel(model, train_data, args):
+    btel_weight = float(getattr(args, "btel_weight", 0.0) or 0.0)
+    if btel_weight == 0.0:
+        return train_data.train_loader, None
+    max_batches = getattr(args, "max_train_batches", None)
+    if max_batches is not None and max_batches <= 0:
+        max_batches = None
+    print(
+        "Building frozen BTEL artifacts "
+        f"(scale={getattr(args, 'btel_prototype_scale', 50.0):g}, "
+        f"negative_quantile={getattr(args, 'btel_negative_quantile', 0.95):g})..."
+    )
+    artifacts = build_btel_artifacts(
+        model,
+        train_data.train_loader,
+        train_data.train_dataset,
+        classnames=train_data.classnames,
+        device=args.device,
+        prototype_scale=getattr(args, "btel_prototype_scale", 50.0),
+        negative_quantile=getattr(args, "btel_negative_quantile", 0.95),
+        max_batches=max_batches,
+    )
+    metadata = getattr(train_data.train_dataset, "metadata_array", None)
+    if not isinstance(metadata, torch.Tensor):
+        raise ValueError("BTEL requires train_dataset.metadata_array from the WILDS iWildCam split.")
+    sampler = BurstBatchSampler(
+        metadata,
+        sequence_field_index=artifacts.sequence_field_index,
+        frame_budget=args.batch_size,
+        max_frames_per_sequence=getattr(args, "btel_max_frames_per_sequence", 8),
+        seed=args.seed,
+    )
+    loader = DataLoader(
+        train_data.train_dataset,
+        batch_sampler=sampler,
+        num_workers=args.workers,
+        pin_memory=str(args.device).startswith("cuda"),
+    )
+    print(
+        "Built BTEL artifacts: "
+        f"{int((artifacts.class_counts > 0).sum().item())}/{len(artifacts.class_counts)} class prototypes, "
+        f"{len(loader)} burst-preserving batches per epoch"
+    )
+    return loader, artifacts
+
+
+def planned_training_steps(train_loader, args) -> int:
+    """Count scheduled optimizer steps for the exact deterministic epoch batch plans."""
+    batch_sampler = getattr(train_loader, "batch_sampler", None)
+    max_batches = getattr(args, "max_train_batches", None)
+    if max_batches is not None and max_batches <= 0:
+        max_batches = None
+    if hasattr(batch_sampler, "batch_count_for_epoch"):
+        epoch_batch_counts = [batch_sampler.batch_count_for_epoch(epoch) for epoch in range(1, args.epochs + 1)]
+    else:
+        epoch_batch_counts = [len(train_loader)] * args.epochs
+    if max_batches is not None:
+        epoch_batch_counts = [min(count, max_batches) for count in epoch_batch_counts]
+    return max(sum(epoch_batch_counts), 1)
+
+
+def print_btel_audits(train_data, val_dataset, args):
+    num_classes = len(train_data.classnames)
+    print_sequence_audit(
+        audit_sequences(
+            train_data.train_dataset,
+            split_name="train",
+            num_classes=num_classes,
+            classnames=train_data.classnames,
+        )
+    )
+    if val_dataset is not None:
+        print_sequence_audit(
+            audit_sequences(
+                val_dataset.test_dataset,
+                split_name=args.val_dataset,
+                num_classes=num_classes,
+                classnames=train_data.classnames,
+            )
+        )
+
+
 def tail_prototype_source_model(model, tail_teacher_model, args):
     if getattr(args, "tail_proto_objective", "ce") == "fixed_distill":
         if tail_teacher_model is None:
@@ -191,6 +276,8 @@ def main(args):
     if args.template is None:
         args.template = "iwildcam_template"
     ensure_open_clip_for_flyp(args.model)
+    if float(getattr(args, "btel_weight", 0.0) or 0.0) != 0.0:
+        validate_btel_validation_split(args.val_dataset)
 
     model, zeroshot_state_dict = initialize_flyp_model(args)
     train_dataset_class = getattr(datasets, args.train_dataset)
@@ -200,6 +287,16 @@ def main(args):
         batch_size=args.batch_size,
         num_workers=args.workers,
     )
+    val_dataset = None
+    wise_alphas = parse_wise_alphas(getattr(args, "wise_alphas", None))
+    needs_val_dataset = args.epochs > 0 or bool(wise_alphas) or getattr(args, "btel_audit_only", False)
+    if args.val_dataset is not None and needs_val_dataset:
+        val_dataset = build_eval_dataset(args.val_dataset, unwrap_model(model), args, allow_ood_hp_subsample=True)
+    if float(getattr(args, "btel_weight", 0.0) or 0.0) != 0.0 or getattr(args, "btel_audit_only", False):
+        print_btel_audits(train_data, val_dataset, args)
+    if getattr(args, "btel_audit_only", False):
+        return
+    train_loader, btel_artifacts = maybe_prepare_btel(model, train_data, args)
     tail_teacher_model = maybe_build_tail_teacher_model(args)
     tail_prototypes, tail_class_counts = maybe_build_tail_prototypes(model, train_data, args, tail_teacher_model=tail_teacher_model)
     tail_zeroshot_classifier = maybe_build_tail_distillation_head(model, args)
@@ -210,10 +307,7 @@ def main(args):
         lr=args.lr,
         weight_decay=args.wd,
     )
-    effective_batches_per_epoch = len(train_data.train_loader)
-    if args.max_train_batches is not None and args.max_train_batches > 0:
-        effective_batches_per_epoch = min(effective_batches_per_epoch, args.max_train_batches)
-    total_steps = max(args.epochs * effective_batches_per_epoch, 1)
+    total_steps = planned_training_steps(train_loader, args)
     scheduler = build_step_lr_scheduler(optimizer, args, total_steps)
     use_amp = should_use_flyp_amp(args)
     args.use_amp = use_amp
@@ -224,19 +318,16 @@ def main(args):
     best_score = None
     best_epoch = None
     best_checkpoint_path = resolve_flyp_best_checkpoint_path(args)
-    wise_alphas = parse_wise_alphas(getattr(args, "wise_alphas", None))
     selected_wise_alpha = getattr(args, "wise_eval_alpha", None)
     if selected_wise_alpha is not None and not (0.0 <= selected_wise_alpha <= 1.0):
         raise ValueError(f"--wise-eval-alpha must be in [0, 1], got {selected_wise_alpha}")
-    val_dataset = None
-    needs_val_dataset = args.epochs > 0 or bool(wise_alphas)
-    if args.val_dataset is not None and needs_val_dataset:
-        val_dataset = build_eval_dataset(args.val_dataset, unwrap_model(model), args, allow_ood_hp_subsample=True)
-
     for epoch in range(1, args.epochs + 1):
+        batch_sampler = getattr(train_loader, "batch_sampler", None)
+        if hasattr(batch_sampler, "set_epoch"):
+            batch_sampler.set_epoch(epoch)
         stats = train_flyp_one_epoch(
             model,
-            train_data.train_loader,
+            train_loader,
             optimizer,
             args,
             train_data.classnames,
@@ -249,6 +340,7 @@ def main(args):
             tail_zeroshot_classifier=tail_zeroshot_classifier,
             tail_teacher_model=tail_teacher_model,
             tail_teacher_classifier=tail_teacher_classifier,
+            btel_artifacts=btel_artifacts,
             scheduler=scheduler,
             scaler=scaler,
         )
@@ -259,12 +351,16 @@ def main(args):
                 "train/clip_loss": stats.clip_loss,
                 "train/drm_loss": stats.drm_loss,
                 "train/tail_loss": stats.tail_loss,
+                "train/btel_loss": stats.btel_loss,
                 "train/drm_to_clip_ratio": stats.drm_to_clip_ratio,
                 "train/tail_to_clip_ratio": stats.tail_to_clip_ratio,
+                "train/btel_to_clip_ratio": stats.btel_to_clip_ratio,
                 "train/drm_effective_weight": stats.drm_effective_weight,
                 "train/tail_proto_weight": stats.tail_proto_weight,
                 "train/tail_proto_scale": stats.tail_proto_scale,
                 "train/tail_proto_objective": stats.tail_proto_objective,
+                "train/btel_weight": stats.btel_weight,
+                "train/btel_prototype_scale": stats.btel_prototype_scale,
                 "train/lr": stats.lr,
                 "epoch": epoch,
             })

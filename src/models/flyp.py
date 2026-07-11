@@ -11,7 +11,8 @@ from src.device import optimizer_step
 from src.models.clip_encoder import ImageClassifier
 from src.models.coop import eval_coop_single_dataset
 from src.models.coop import unwrap_model
-from src.models.tail_prototype import fixed_tail_prototype_distillation_loss, tail_prototype_distillation_loss, tail_prototype_loss
+from src.models.btel import BTELArtifacts, btel_sequence_loss
+from src.models.tail_prototype import fixed_tail_prototype_distillation_loss, tail_prototype_distillation_loss, tail_prototype_logits, tail_prototype_loss
 from src.models.zeroshot import get_zeroshot_classifier
 
 
@@ -22,12 +23,16 @@ class FlypTrainStats:
     clip_loss: float = 0.0
     drm_loss: float = 0.0
     tail_loss: float = 0.0
+    btel_loss: float = 0.0
     drm_to_clip_ratio: float = 0.0
     tail_to_clip_ratio: float = 0.0
+    btel_to_clip_ratio: float = 0.0
     drm_effective_weight: float = 0.0
     tail_proto_weight: float = 0.0
     tail_proto_scale: float = 0.0
     tail_proto_objective: str = "ce"
+    btel_weight: float = 0.0
+    btel_prototype_scale: float = 0.0
     lr: float | None = None
 
 
@@ -180,6 +185,7 @@ def train_flyp_one_epoch(
     tail_zeroshot_classifier=None,
     tail_teacher_model=None,
     tail_teacher_classifier=None,
+    btel_artifacts: BTELArtifacts | None = None,
     scheduler=None,
     scaler=None,
 ):
@@ -194,11 +200,14 @@ def train_flyp_one_epoch(
     total_clip_loss = 0.0
     total_drm_loss = 0.0
     total_tail_loss = 0.0
+    total_btel_loss = 0.0
     total_seen = 0
     max_batches = args.max_train_batches
     tail_weight = float(getattr(args, "tail_proto_weight", 0.0) or 0.0)
     tail_scale = float(getattr(args, "tail_proto_scale", 50.0))
     tail_objective = getattr(args, "tail_proto_objective", "ce")
+    btel_weight = float(getattr(args, "btel_weight", 0.0) or 0.0)
+    btel_scale = float(getattr(args, "btel_prototype_scale", 50.0))
     if tail_weight != 0.0 and tail_prototypes is None:
         raise ValueError("tail_prototypes are required when --tail-proto-weight is non-zero.")
     if tail_weight != 0.0 and tail_objective == "distill" and tail_zeroshot_classifier is None:
@@ -209,6 +218,8 @@ def train_flyp_one_epoch(
                 "tail_zeroshot_classifier, tail_teacher_model, and tail_teacher_classifier are required "
                 "when --tail-proto-objective=fixed_distill."
             )
+    if btel_weight != 0.0 and btel_artifacts is None:
+        raise ValueError("btel_artifacts are required when --btel-weight is non-zero.")
 
     for batch_index, data in enumerate(tqdm(dataloader, desc=f"FLYP train epoch {epoch}")):
         if max_batches is not None and batch_index >= max_batches:
@@ -216,7 +227,7 @@ def train_flyp_one_epoch(
 
         data = maybe_dictionarize(data)
         images = data["images"].to(args.device)
-        labels = data["labels"]
+        labels = data["labels"].to(args.device)
         teacher_features = None
         if tail_weight != 0.0 and tail_objective == "fixed_distill":
             with torch.inference_mode():
@@ -269,7 +280,23 @@ def train_flyp_one_epoch(
                 tail_loss = float(tail_weight) * tail_raw_loss
             else:
                 tail_loss = clip_loss.new_zeros(())
-            loss = clip_loss + drm_loss + tail_loss
+            if btel_weight != 0.0:
+                metadata = data.get("metadata")
+                if metadata is None:
+                    raise ValueError("BTEL requires training batches with iWildCam metadata.")
+                btel_raw_loss = btel_sequence_loss(
+                    tail_prototype_logits(image_features, btel_artifacts.prototypes, btel_scale),
+                    labels,
+                    metadata,
+                    sequence_field_index=btel_artifacts.sequence_field_index,
+                    class_counts=btel_artifacts.class_counts,
+                    negative_thresholds=btel_artifacts.negative_thresholds,
+                    empty_class_index=btel_artifacts.empty_class_index,
+                )
+                btel_loss = btel_weight * btel_raw_loss
+            else:
+                btel_loss = clip_loss.new_zeros(())
+            loss = clip_loss + drm_loss + tail_loss + btel_loss
         if not torch.isfinite(loss):
             raise FloatingPointError(f"FLYP produced non-finite loss at epoch {epoch}, batch {batch_index}")
 
@@ -296,10 +323,11 @@ def train_flyp_one_epoch(
             scheduler.step()
 
         batch_size = images.shape[0]
-        total_loss += (clip_loss.item() + drm_loss.item() + tail_loss.item()) * batch_size
+        total_loss += (clip_loss.item() + drm_loss.item() + tail_loss.item() + btel_loss.item()) * batch_size
         total_clip_loss += clip_loss.item() * batch_size
         total_drm_loss += drm_loss.item() * batch_size
         total_tail_loss += tail_loss.item() * batch_size
+        total_btel_loss += btel_loss.item() * batch_size
         total_seen += batch_size
 
     if total_seen == 0:
@@ -311,12 +339,16 @@ def train_flyp_one_epoch(
         clip_loss=total_clip_loss / total_seen,
         drm_loss=total_drm_loss / total_seen,
         tail_loss=total_tail_loss / total_seen,
+        btel_loss=total_btel_loss / total_seen,
         drm_to_clip_ratio=total_drm_loss / max(total_clip_loss, 1e-12),
         tail_to_clip_ratio=total_tail_loss / max(total_clip_loss, 1e-12),
+        btel_to_clip_ratio=total_btel_loss / max(total_clip_loss, 1e-12),
         drm_effective_weight=drm_effective_weight,
         tail_proto_weight=tail_weight,
         tail_proto_scale=tail_scale if tail_weight != 0.0 else 0.0,
         tail_proto_objective=tail_objective if tail_weight != 0.0 else "none",
+        btel_weight=btel_weight,
+        btel_prototype_scale=btel_scale if btel_weight != 0.0 else 0.0,
         lr=current_lr,
     )
 

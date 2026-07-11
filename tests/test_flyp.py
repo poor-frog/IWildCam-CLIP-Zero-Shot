@@ -378,6 +378,60 @@ class FlypModuleTest(unittest.TestCase):
         self.assertAlmostEqual(stats.loss, stats.clip_loss + stats.tail_loss, places=6)
         self.assertAlmostEqual(stats.tail_to_clip_ratio, stats.tail_loss / stats.clip_loss, places=6)
 
+    def test_train_flyp_one_epoch_adds_btel_auxiliary_loss_for_complete_bursts(self):
+        from src.models.btel import BTELArtifacts
+        from src.models.flyp import train_flyp_one_epoch
+
+        class TinyTokenizer:
+            def __call__(self, captions):
+                return torch.zeros(len(captions), 4, dtype=torch.long)
+
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.eye(2))
+
+            def forward(self, images, text):
+                features = images @ self.weight
+                return features, features, torch.ones(())
+
+        model = TinyModel()
+        batch = {
+            "images": torch.tensor([[0.0, 1.0], [0.2, 0.8], [1.0, 0.0]]),
+            "labels": torch.tensor([1, 1, 0]),
+            "metadata": torch.tensor([[10], [10], [20]]),
+        }
+        args = SimpleNamespace(
+            device="cpu",
+            model="ViT-B-16",
+            max_train_batches=1,
+            btel_weight=0.5,
+            btel_prototype_scale=10.0,
+        )
+        artifacts = BTELArtifacts(
+            prototypes=torch.eye(2),
+            class_counts=torch.tensor([100, 10]),
+            negative_thresholds=torch.zeros(2),
+            sequence_field_index=0,
+            empty_class_index=0,
+        )
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.0)
+
+        with patch("src.models.flyp.open_clip.get_tokenizer", return_value=TinyTokenizer()):
+            stats = train_flyp_one_epoch(
+                model,
+                [batch],
+                optimizer,
+                args,
+                ["empty", "deer"],
+                [lambda c: f"a photo of {c}."],
+                epoch=1,
+                btel_artifacts=artifacts,
+            )
+
+        self.assertGreater(stats.btel_loss, 0.0)
+        self.assertAlmostEqual(stats.loss, stats.clip_loss + stats.btel_loss, places=6)
+
     def test_train_flyp_one_epoch_adds_tail_prototype_distillation_loss(self):
         from src.models.flyp import train_flyp_one_epoch
 
