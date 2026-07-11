@@ -24,6 +24,7 @@ from src.models.stmp_adapter import (
     print_metadata_audit,
     resolve_metadata_field_index,
 )
+from src.models.sctr import apply_tail_protective_sctr
 from src.models.stp_diagnostics import build_stp_diagnostics
 from src.models.tail_prototype import apply_tail_class_weights, tail_class_weights
 from src.train_coop import build_eval_dataset, log_wandb_summary
@@ -69,6 +70,8 @@ def parse_arguments():
     parser.add_argument("--gate-mode-grid", type=str, default="none")
     parser.add_argument("--gate-strength-grid", type=str, default="0")
     parser.add_argument("--sequence-consensus-grid", type=str, default="0")
+    parser.add_argument("--sctr-strength-grid", type=str, default="0")
+    parser.add_argument("--sctr-tail-protection-grid", type=str, default="1")
     parser.add_argument("--sequence-id-field", type=str, default="auto")
     parser.add_argument("--multi-prototype-k-grid", type=str, default="1")
     parser.add_argument("--multi-prototype-reduction", type=str, default="max", choices=["max", "logsumexp"])
@@ -259,6 +262,8 @@ def build_candidate_predictions(base_logits, prototype_raw_logits_by_k, concept_
     tail_gamma = float(row.get("tail_gamma", 0.0))
     prototype_k = int(row.get("prototype_k", 1))
     sequence_eta = float(row.get("sequence_eta", 0.0))
+    sctr_strength = float(row.get("sctr_strength", 0.0))
+    sctr_tail_protection = float(row.get("sctr_tail_protection", 0.0))
     gate_mode = row.get("gate_mode", "none")
     gate_strength = float(row.get("gate_strength", 0.0))
     prototype_raw_logits = prototype_raw_logits_by_k[prototype_k]
@@ -266,6 +271,15 @@ def build_candidate_predictions(base_logits, prototype_raw_logits_by_k, concept_
     gate = confidence_gate(base_logits, gate_mode, gate_strength)
     prototype_combo_logits = base_logits + prototype_scale * gate * weighted_prototype_logits
     prototype_combo_logits = apply_logit_adjustment(prototype_combo_logits, class_priors, tau)
+    if head == "sctr":
+        return apply_tail_protective_sctr(
+            prototype_combo_logits,
+            metadata,
+            sequence_field_index,
+            class_priors,
+            sctr_strength,
+            sctr_tail_protection,
+        )
     prototype_combo_logits = apply_sequence_consensus(prototype_combo_logits, metadata, sequence_field_index, sequence_eta)
 
     if head in {"prototype", "prototype_tau"}:
@@ -318,7 +332,9 @@ def write_stp_diagnostics(path, split_name, labels, frame_logits, stp_logits, tr
     return diagnostics
 
 
-def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, include_concept):
+def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, include_concept, sctr_strength_grid=None, sctr_tail_protection_grid=None):
+    sctr_strength_grid = [0.0] if sctr_strength_grid is None else sctr_strength_grid
+    sctr_tail_protection_grid = [1.0] if sctr_tail_protection_grid is None else sctr_tail_protection_grid
     rows = [{
         "head": "default",
         "prototype_scale": 0.0,
@@ -328,6 +344,8 @@ def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mo
         "sequence_eta": 0.0,
         "gate_mode": "none",
         "gate_strength": 0.0,
+        "sctr_strength": 0.0,
+        "sctr_tail_protection": 0.0,
         "concept_beta": None,
     }]
     for scale in prototype_scale_grid:
@@ -345,6 +363,8 @@ def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mo
                                 "sequence_eta": float(sequence_eta),
                                 "gate_mode": gate_mode,
                                 "gate_strength": float(gate_strength),
+                                "sctr_strength": 0.0,
+                                "sctr_tail_protection": 0.0,
                                 "concept_beta": None,
                             })
     for scale in prototype_scale_grid:
@@ -363,6 +383,8 @@ def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mo
                                     "sequence_eta": float(sequence_eta),
                                     "gate_mode": gate_mode,
                                     "gate_strength": float(gate_strength),
+                                    "sctr_strength": 0.0,
+                                    "sctr_tail_protection": 0.0,
                                     "concept_beta": None,
                                 })
     if include_concept:
@@ -376,6 +398,8 @@ def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mo
                 "sequence_eta": 0.0,
                 "gate_mode": "none",
                 "gate_strength": 0.0,
+                "sctr_strength": 0.0,
+                "sctr_tail_protection": 0.0,
                 "concept_beta": float(concept_beta),
             })
         for concept_beta in concept_beta_grid:
@@ -395,12 +419,32 @@ def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mo
                                             "sequence_eta": float(sequence_eta),
                                             "gate_mode": gate_mode,
                                             "gate_strength": float(gate_strength),
+                                            "sctr_strength": 0.0,
+                                            "sctr_tail_protection": 0.0,
                                             "concept_beta": float(concept_beta),
                                         })
+    for scale in prototype_scale_grid:
+        for prototype_k in prototype_k_grid:
+            for tail_gamma in tail_gamma_grid:
+                for routing_strength in sctr_strength_grid:
+                    for tail_protection in sctr_tail_protection_grid:
+                        rows.append({
+                            "head": "sctr",
+                            "prototype_scale": float(scale),
+                            "tau": 0.0,
+                            "tail_gamma": float(tail_gamma),
+                            "prototype_k": int(prototype_k),
+                            "sequence_eta": 0.0,
+                            "gate_mode": "none",
+                            "gate_strength": 0.0,
+                            "sctr_strength": float(routing_strength),
+                            "sctr_tail_protection": float(tail_protection),
+                            "concept_beta": None,
+                        })
     return rows
 
 
-def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, concept_raw_logits, labels, metadata, args, prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, class_priors, tail_weights_by_gamma, sequence_field_index=None):
+def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, concept_raw_logits, labels, metadata, args, prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, class_priors, tail_weights_by_gamma, sctr_strength_grid=None, sctr_tail_protection_grid=None, sequence_field_index=None):
     rows = []
     best_by_head = {}
     candidate_rows = make_candidate_rows(
@@ -413,6 +457,8 @@ def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, conce
         prototype_k_grid,
         concept_beta_grid,
         concept_raw_logits is not None,
+        sctr_strength_grid=sctr_strength_grid,
+        sctr_tail_protection_grid=sctr_tail_protection_grid,
     )
     for candidate in candidate_rows:
         results = evaluate_candidate(
@@ -446,22 +492,22 @@ def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, conce
 def print_selection(rows, best_by_head, limit=16):
     ranked = sorted(rows, key=lambda row: row["score"], reverse=True)[:limit]
     print("\n=== Tail Cache Ablation Selection on Validation ===")
-    print("| Rank | Head              | Scale | K | Seq eta | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
-    print("| ---- | ----------------- | ----- | - | ------- | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
+    print("| Rank | Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
+    print("| ---- | ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
     for rank, row in enumerate(ranked, start=1):
         top1 = f"{row['top1'] * 100:.2f}%"
         f1 = "N/A" if row["F1-macro_all"] is None else f"{row['F1-macro_all'] * 100:.2f}%"
         concept_beta = "N/A" if row["concept_beta"] is None else f"{row['concept_beta']:g}"
         print(
             f"| {rank:<4} | {row['head']:<17} | {row['prototype_scale']:<5g} | {row['prototype_k']:<1d} | "
-            f"{row['sequence_eta']:<7g} | {row['tau']:<4g} | {row['tail_gamma']:<10g} | {row['gate_mode']:<8} | {row['gate_strength']:<8g} | "
+            f"{row['sequence_eta']:<7g} | {row['sctr_strength']:<10g} | {row['sctr_tail_protection']:<12g} | {row['tau']:<4g} | {row['tail_gamma']:<10g} | {row['gate_mode']:<8} | {row['gate_strength']:<8g} | "
             f"{concept_beta:<12} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |"
         )
 
     print("\n=== Best by Ablation Head ===")
-    print("| Head              | Scale | K | Seq eta | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
-    print("| ----------------- | ----- | - | ------- | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
-    for head in ("default", "prototype", "prototype_tau", "concept", "concept_prototype"):
+    print("| Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
+    print("| ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
+    for head in ("default", "prototype", "prototype_tau", "sctr", "concept", "concept_prototype"):
         row = best_by_head.get(head)
         if row is None:
             continue
@@ -470,7 +516,7 @@ def print_selection(rows, best_by_head, limit=16):
         concept_beta = "N/A" if row["concept_beta"] is None else f"{row['concept_beta']:g}"
         print(
             f"| {head:<17} | {row['prototype_scale']:<5g} | {row['prototype_k']:<1d} | "
-            f"{row['sequence_eta']:<7g} | {row['tau']:<4g} | {row['tail_gamma']:<10g} | {row['gate_mode']:<8} | {row['gate_strength']:<8g} | "
+            f"{row['sequence_eta']:<7g} | {row['sctr_strength']:<10g} | {row['sctr_tail_protection']:<12g} | {row['tau']:<4g} | {row['tail_gamma']:<10g} | {row['gate_mode']:<8} | {row['gate_strength']:<8g} | "
             f"{concept_beta:<12} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |"
         )
 
@@ -593,6 +639,8 @@ def main(args):
     gate_mode_grid = [item.strip() for item in args.gate_mode_grid.split(",") if item.strip()]
     gate_strength_grid = parse_float_grid(args.gate_strength_grid)
     sequence_eta_grid = parse_float_grid(args.sequence_consensus_grid)
+    sctr_strength_grid = parse_float_grid(args.sctr_strength_grid)
+    sctr_tail_protection_grid = parse_float_grid(args.sctr_tail_protection_grid)
     concept_beta_grid = parse_float_grid(args.concept_beta_grid)
     tail_weights_by_gamma = {
         float(gamma): tail_class_weights(counts, gamma, max_weight=args.tail_weight_max)
@@ -639,6 +687,8 @@ def main(args):
         concept_beta_grid,
         class_priors,
         tail_weights_by_gamma,
+        sctr_strength_grid=sctr_strength_grid,
+        sctr_tail_protection_grid=sctr_tail_protection_grid,
         sequence_field_index=sequence_field_index,
     )
     print_selection(selection_rows, best_by_head)
@@ -718,7 +768,7 @@ def main(args):
                     f"stp_diagnostics/{dataset_name}/frame_wrong_stp_correct": diagnostics.frame_wrong_stp_correct,
                     f"stp_diagnostics/{dataset_name}/frame_correct_stp_wrong": diagnostics.frame_correct_stp_wrong,
                 })
-        for head_name in ("default", "prototype", "prototype_tau", "concept", "concept_prototype"):
+        for head_name in ("default", "prototype", "prototype_tau", "sctr", "concept", "concept_prototype"):
             best = best_by_head.get(head_name)
             if best is None:
                 continue
@@ -751,6 +801,8 @@ def main(args):
                     "tail_cache/best_tau": best["tau"],
                     f"tail_cache/{head_name}/tail_gamma": best["tail_gamma"],
                     f"tail_cache/{head_name}/gate_strength": best["gate_strength"],
+                    f"tail_cache/{head_name}/sctr_strength": best["sctr_strength"],
+                    f"tail_cache/{head_name}/sctr_tail_protection": best["sctr_tail_protection"],
                     f"tail_cache/{head_name}/concept_beta": best["concept_beta"],
                 })
         for label, candidate in key_ablation_rows:

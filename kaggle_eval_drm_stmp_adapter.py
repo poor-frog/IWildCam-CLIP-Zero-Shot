@@ -28,9 +28,11 @@ STP_DIAGNOSTICS_REPORT = os.environ.get(
     "/kaggle/working/stp_diagnostics_iwildcamood.md",
 )
 STP_DIAGNOSTICS_BOOTSTRAP_SAMPLES = os.environ.get("DRM_STP_DIAGNOSTICS_BOOTSTRAP_SAMPLES", "1000")
+SCTR_STRENGTH_GRID = os.environ.get("DRM_SCTR_STRENGTH_GRID", "0.25,0.5,1")
+SCTR_TAIL_PROTECTION_GRID = os.environ.get("DRM_SCTR_TAIL_PROTECTION_GRID", "0,0.5,1,2")
 WANDB_RUN_NAME = os.environ.get(
-    "DRM_STP_WANDB_RUN_NAME",
-    "drm-stp-diagnostics-k1-seq0-0p25-0p5-vitb16-iwildcamval",
+    "DRM_SCTR_WANDB_RUN_NAME",
+    "drm-sctr-v1-route0p25-0p5-1-tail0-0p5-1-2-vitb16-iwildcamval",
 )
 
 
@@ -247,14 +249,13 @@ def main():
         f"--gate-mode-grid={GATE_MODE_GRID}",
         f"--gate-strength-grid={GATE_STRENGTH_GRID}",
         f"--sequence-consensus-grid={SEQUENCE_CONSENSUS_GRID}",
+        f"--sctr-strength-grid={SCTR_STRENGTH_GRID}",
+        f"--sctr-tail-protection-grid={SCTR_TAIL_PROTECTION_GRID}",
         "--sequence-id-field=auto",
         f"--multi-prototype-k-grid={MULTI_PROTOTYPE_K_GRID}",
         f"--multi-prototype-reduction={MULTI_PROTOTYPE_REDUCTION}",
         "--audit-metadata",
         "--report-key-ablation-candidates",
-        f"--stp-diagnostics-report={STP_DIAGNOSTICS_REPORT}",
-        "--stp-diagnostics-split=IWildCamOOD",
-        f"--stp-diagnostics-bootstrap-samples={STP_DIAGNOSTICS_BOOTSTRAP_SAMPLES}",
         "--max-cache-examples-per-class=0",
         f"--batch-size={BATCH_SIZE}",
         f"--workers={WORKERS}",
@@ -268,7 +269,7 @@ def main():
         ])
     else:
         command.append("--no-wandb")
-    print("Running DRM + STP diagnostic evaluation:")
+    print("Running DRM + SCTR validation-selected evaluation:")
     print(" ".join(str(part) for part in command))
     run(command, cwd=repo_root)
 

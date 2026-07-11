@@ -64,8 +64,9 @@ class KaggleEvalDrmStmpAdapterTest(unittest.TestCase):
         self.assertIn("--prototype-scale-grid=50", command)
         self.assertIn("--sequence-consensus-grid=0,0.25,0.5", command)
         self.assertIn("--multi-prototype-k-grid=1", command)
-        self.assertIn("--stp-diagnostics-report=/kaggle/working/stp_diagnostics_iwildcamood.md", command)
-        self.assertIn("--wandb-run-name=drm-stp-diagnostics-k1-seq0-0p25-0p5-vitb16-iwildcamval", command)
+        self.assertIn("--sctr-strength-grid=0.25,0.5,1", command)
+        self.assertIn("--sctr-tail-protection-grid=0,0.5,1,2", command)
+        self.assertIn("--wandb-run-name=drm-sctr-v1-route0p25-0p5-1-tail0-0p5-1-2-vitb16-iwildcamval", command)
 
 
 if __name__ == "__main__":
