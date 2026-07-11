@@ -21,6 +21,23 @@ def test_leave_one_out_evidence_excludes_query_frame():
     assert torch.equal(evidence[2], torch.zeros(2))
 
 
+def test_leave_one_out_evidence_preserves_half_precision():
+    from src.models.btel import leave_one_out_topk_evidence
+
+    frame_logits = torch.tensor([[10.0, 0.0], [0.0, 8.0]], dtype=torch.float16)
+    metadata = torch.tensor([[1], [1]])
+
+    evidence = leave_one_out_topk_evidence(
+        frame_logits,
+        metadata,
+        sequence_field_index=0,
+        class_counts=torch.tensor([10, 10]),
+    )
+
+    assert evidence.dtype == torch.float16
+    assert torch.equal(evidence, torch.tensor([[0.0, 8.0], [10.0, 0.0]], dtype=torch.float16))
+
+
 def test_leave_one_out_evidence_uses_frequency_dependent_topk():
     from src.models.btel import leave_one_out_topk_evidence
 

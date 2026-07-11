@@ -78,7 +78,7 @@ def leave_one_out_topk_evidence(
         per_class_count = topk.clamp_max(length - 1).view(1, 1, -1)
         selected = ranks < per_class_count
         group_evidence = (ranked_logits * selected).sum(dim=1) / per_class_count.squeeze(1)
-        evidence[group_indices] = group_evidence
+        evidence[group_indices] = group_evidence.to(dtype=frame_logits.dtype)
     return evidence
 
 
