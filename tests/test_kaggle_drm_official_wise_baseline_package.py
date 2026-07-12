@@ -2,6 +2,7 @@ import json
 import importlib.util
 from pathlib import Path
 
+import pytest
 import torch
 
 
@@ -20,7 +21,7 @@ def test_official_wise_package_uses_id_validation_and_dual_inference_source():
     source = (PACKAGE_ROOT / "kaggle_main.py").read_text(encoding="utf-8")
 
     assert '"--train-dataset=IWildCamIDVal"' in source
-    assert '"--cd_path=prompts/iwildcam_cd.json"' in source
+    assert "concept_description_path()" in source
     assert '"--beta={BETA}"' in source
     assert 'from src.models.DRM_eval import drm_eval' in source
     assert '"IWildCamIDVal,IWildCamID,IWildCamOOD"' in source
@@ -45,3 +46,29 @@ def test_wise_interpolation_uses_zero_shot_weight_with_rho():
     merged = launcher.interpolate_wise(zero_shot.state_dict(), finetuned, 0.25)
 
     assert merged.weight.item() == 8.0
+
+
+def test_wise_interpolation_rejects_mismatched_tensor_shapes():
+    launcher = load_launcher()
+
+    class Dummy(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.zeros(1, 2))
+
+    with pytest.raises(RuntimeError, match="tensor shapes differ"):
+        launcher.interpolate_wise({"weight": torch.zeros(1, 1)}, Dummy(), 0.25)
+
+
+def test_drm_path_helpers_use_repo_root_and_restore_cwd(tmp_path, monkeypatch):
+    launcher = load_launcher()
+    prompt_path = tmp_path / "prompts" / "iwildcam_cd.json"
+    prompt_path.parent.mkdir()
+    prompt_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(launcher, "DRM_ROOT", tmp_path)
+
+    assert launcher.concept_description_path() == prompt_path
+    original = Path.cwd()
+    with launcher.in_drm_repo():
+        assert Path.cwd() == tmp_path
+    assert Path.cwd() == original

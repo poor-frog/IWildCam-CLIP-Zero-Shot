@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -85,7 +86,24 @@ def stage_checkpoint(checkpoint_path):
     return target
 
 
-def parse_drm_args(data_location, checkpoint_path, alpha, eval_datasets, exp_name):
+def concept_description_path():
+    path = DRM_ROOT / "prompts" / "iwildcam_cd.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"Official DRM concept-description file is missing: {path}")
+    return path
+
+
+@contextmanager
+def in_drm_repo():
+    previous = Path.cwd()
+    os.chdir(DRM_ROOT)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
+def parse_drm_args(data_location, checkpoint_path, eval_datasets, exp_name):
     from src.args import parse_arguments
 
     original_argv = sys.argv
@@ -98,7 +116,7 @@ def parse_drm_args(data_location, checkpoint_path, alpha, eval_datasets, exp_nam
         "--template=iwildcam_template",
         f"--data-location={data_location}",
         f"--exp_name={exp_name}",
-        "--cd_path=prompts/iwildcam_cd.json",
+        f"--cd_path={concept_description_path()}",
         f"--beta={BETA}",
         f"--checkpoint_path={checkpoint_path}",
     ]
@@ -117,6 +135,11 @@ def interpolate_wise(zeroshot_state, finetuned, alpha):
     merged = {}
     for key, fine_value in finetuned_state.items():
         zero_value = zeroshot_state[key]
+        if tuple(zero_value.shape) != tuple(fine_value.shape):
+            raise RuntimeError(
+                f"Zero-shot and DRM checkpoint tensor shapes differ for {key}: "
+                f"{tuple(zero_value.shape)} != {tuple(fine_value.shape)}"
+            )
         if torch.is_floating_point(fine_value):
             merged[key] = alpha * zero_value.to(dtype=fine_value.dtype) + (1.0 - alpha) * fine_value
         else:
@@ -149,10 +172,11 @@ def evaluate_alpha(data_location, checkpoint_path, zeroshot_state, alpha, eval_d
     from src.models.DRM_eval import drm_eval
     from src.models.modeling import CLIPEncoder
 
-    args = parse_drm_args(data_location, checkpoint_path, alpha, eval_datasets, label)
+    args = parse_drm_args(data_location, checkpoint_path, eval_datasets, label)
     finetuned = CLIPEncoder.load(checkpoint_path).cpu()
     merged = interpolate_wise(zeroshot_state, finetuned, alpha)
-    drm_eval(args, merged, logger)
+    with in_drm_repo():
+        drm_eval(args, merged, logger)
     metrics = read_metrics(stats_path(label))
     del merged
     torch.cuda.empty_cache()
@@ -185,7 +209,7 @@ def main():
         raise RuntimeError("Official DRM WiSE baseline requires a Kaggle GPU runtime.")
     data_location = find_iwildcam_data_location()
     checkpoint_path = stage_checkpoint(find_checkpoint())
-    zeroshot_args = parse_drm_args(data_location, checkpoint_path, 0.0, "IWildCamIDVal", "iwildcam/zero_shot_anchor")
+    zeroshot_args = parse_drm_args(data_location, checkpoint_path, "IWildCamIDVal", "iwildcam/zero_shot_anchor")
     zeroshot_state = {key: value.detach().cpu().clone() for key, value in CLIPEncoder(zeroshot_args, keep_lang=True).cpu().state_dict().items()}
     wandb_run = None
     if wandb_enabled:
