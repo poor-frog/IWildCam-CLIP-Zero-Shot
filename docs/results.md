@@ -71,4 +71,4 @@ do not promote BTEL v1 as the main method. Full provenance is recorded in
 
 ## Historical/reference-only metrics
 
-Any tau-sweep, A1, or C1 metric inherited from old notes or `/Users/jky/Downloads/FLYP/FLYP` is reference-only until reproduced in `/Users/jky/Downloads/FLYP/PoorFrogs`. Do not use reference-only numbers to claim PoorFrogs completion, checkpoint superiority, or OOD improvement.
+Any tau-sweep metric inherited from old notes or `/Users/jky/Downloads/FLYP/FLYP` is reference-only until reproduced in `/Users/jky/Downloads/FLYP/PoorFrogs`. Do not use reference-only numbers to claim PoorFrogs completion, checkpoint superiority, or OOD improvement.
