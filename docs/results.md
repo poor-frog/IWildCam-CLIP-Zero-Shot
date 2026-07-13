@@ -20,7 +20,10 @@ outputs/drm_wise_stp_kaggle_2026-07-12.md
 
 | Method | IWildCamVal F1 | IWildCamIDVal F1 | IWildCamID F1 | IWildCamOOD F1 |
 | ------ | -------------- | ---------------- | ------------- | -------------- |
-| DRM + WiSE + STP | **43.70%** | **52.98%** | **57.95%** | **42.42%** |
+| Official DRM + WiSE, dual concept inference | n/a | 51.36% | 54.82% | 38.91% |
+| DRM + WiSE, converted no TPA | 39.64% | 46.73% | 53.10% | 38.77% |
+| DRM + WiSE + TPA, converted | 41.39% | 51.69% | 56.09% | 40.46% |
+| DRM + WiSE + STP, converted | **43.70%** | **52.98%** | **57.95%** | **42.42%** |
 | FLYP + WiSE default logits | 36.94% | 44.89% | 47.65% | 31.74% |
 | FLYP + Tail Prototype Adapter | 39.60% | 48.09% | 51.41% | 36.11% |
 | STMP-Adapter sequence-only | 41.58% | 50.37% | 54.61% | 37.98% |
