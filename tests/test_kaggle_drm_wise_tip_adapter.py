@@ -3,18 +3,20 @@ from pathlib import Path
 
 
 PACKAGE_ROOT = Path(__file__).parents[1] / "kaggle-drm-wise-tip-adapter-control"
+BALANCED_PACKAGE_ROOT = Path(__file__).parents[1] / "kaggle-drm-wise-tip-adapter-balanced-control"
 
 
 def test_drm_tip_adapter_command_locks_wise_and_enables_only_tip_control():
-    from kaggle_eval_drm_wise_tip_adapter import build_command
+    import kaggle_eval_drm_wise_tip_adapter as launcher
 
-    command = build_command("/kaggle/working/data", "/kaggle/working/drm.pt")
+    command = launcher.build_command("/kaggle/working/data", "/kaggle/working/drm.pt")
 
     assert "--wise-eval-alpha=0.2" in command
     assert "--prototype-scale-grid=0" in command
     assert "--sequence-consensus-grid=0" in command
     assert "--tip-adapter-beta-grid=0.1,0.5,1,2,5,7" in command
     assert "--tip-adapter-alpha-grid=0.1,0.5,1,2,3" in command
+    assert "--tip-adapter-support-shots-grid=0" in command
     assert "--summary-head=tip_adapter" in command
     assert all("--wise-alpha-grid" not in argument for argument in command)
 
@@ -34,3 +36,13 @@ def test_tip_adapter_kernel_wrapper_uses_secret_or_empty_hardcode_placeholder():
 
     assert 'HARDCODED_WANDB_API_KEY = ""' in source
     assert '"kaggle_eval_drm_wise_tip_adapter.py"' in source
+
+
+def test_balanced_tip_adapter_kernel_uses_shot_and_log_alpha_grids():
+    metadata = json.loads((BALANCED_PACKAGE_ROOT / "kernel-metadata.json").read_text(encoding="utf-8"))
+    source = (BALANCED_PACKAGE_ROOT / "kaggle_main.py").read_text(encoding="utf-8")
+
+    assert metadata["code_file"] == "kaggle_main.py"
+    assert metadata["is_private"] is True
+    assert '"DRM_TIP_ADAPTER_SUPPORT_SHOTS_GRID": "1,4,16"' in source
+    assert '"DRM_TIP_ADAPTER_ALPHA_GRID": "0.000001,0.000003,0.00001,0.00003,0.0001,0.0003,0.001,0.003,0.01,0.03"' in source

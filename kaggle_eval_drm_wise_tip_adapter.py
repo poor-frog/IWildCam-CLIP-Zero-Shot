@@ -25,6 +25,7 @@ from kaggle_eval_drm_stmp_adapter import (
 FIXED_WISE_ALPHA = "0.2"
 TIP_ADAPTER_BETA_GRID = os.environ.get("DRM_TIP_ADAPTER_BETA_GRID", "0.1,0.5,1,2,5,7")
 TIP_ADAPTER_ALPHA_GRID = os.environ.get("DRM_TIP_ADAPTER_ALPHA_GRID", "0.1,0.5,1,2,3")
+TIP_ADAPTER_SUPPORT_SHOTS_GRID = os.environ.get("DRM_TIP_ADAPTER_SUPPORT_SHOTS_GRID", "0")
 TIP_ADAPTER_QUERY_CHUNK_SIZE = os.environ.get("DRM_TIP_ADAPTER_QUERY_CHUNK_SIZE", "256")
 TIP_ADAPTER_CACHE_CHUNK_SIZE = os.environ.get("DRM_TIP_ADAPTER_CACHE_CHUNK_SIZE", "16384")
 BATCH_SIZE = os.environ.get("DRM_TIP_ADAPTER_BATCH_SIZE", "256")
@@ -38,7 +39,7 @@ def assert_repo_supports_tip_adapter(repo_root):
     if not evaluator_path.is_file() or not adapter_path.is_file():
         raise RuntimeError("The cloned repo lacks the Tip-Adapter control. Push the latest PoorFrogs code before rerunning.")
     evaluator_source = evaluator_path.read_text(encoding="utf-8")
-    required_flags = ("--tip-adapter-beta-grid", "--tip-adapter-alpha-grid")
+    required_flags = ("--tip-adapter-beta-grid", "--tip-adapter-alpha-grid", "--tip-adapter-support-shots-grid")
     if any(flag not in evaluator_source for flag in required_flags):
         raise RuntimeError("The cloned repo is stale and lacks Tip-Adapter runtime flags. Push the latest PoorFrogs code before rerunning.")
 
@@ -67,6 +68,7 @@ def build_command(data_location, checkpoint):
         "--max-cache-examples-per-class=0",
         f"--tip-adapter-beta-grid={TIP_ADAPTER_BETA_GRID}",
         f"--tip-adapter-alpha-grid={TIP_ADAPTER_ALPHA_GRID}",
+        f"--tip-adapter-support-shots-grid={TIP_ADAPTER_SUPPORT_SHOTS_GRID}",
         f"--tip-adapter-query-chunk-size={TIP_ADAPTER_QUERY_CHUNK_SIZE}",
         f"--tip-adapter-cache-chunk-size={TIP_ADAPTER_CACHE_CHUNK_SIZE}",
         "--summary-head=tip_adapter",
@@ -99,7 +101,7 @@ def main():
         command.extend(["--wandb", "--wandb-project=PoorFrogs", f"--wandb-run-name={WANDB_RUN_NAME}"])
     else:
         command.append("--no-wandb")
-    print("Running DRM + WiSE + full-data Tip-Adapter control:")
+    print("Running DRM + WiSE + Tip-Adapter control:")
     print(" ".join(str(part) for part in command))
     run(command, cwd=repo_root)
 
