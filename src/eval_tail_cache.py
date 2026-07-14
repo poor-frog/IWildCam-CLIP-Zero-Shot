@@ -28,6 +28,7 @@ from src.models.stmp_adapter import (
 from src.models.sctr import apply_tail_protective_sctr
 from src.models.stp_diagnostics import build_stp_diagnostics
 from src.models.tail_prototype import apply_tail_class_weights, tail_class_weights
+from src.models.tip_adapter import tip_adapter_cache_logits
 from src.train_coop import build_eval_dataset, log_wandb_summary
 from src.train_flyp import clone_state_dict, ensure_open_clip_for_flyp
 from src.train_maple_full import init_wandb
@@ -45,6 +46,33 @@ def parse_int_grid(raw_value):
     if not values:
         raise ValueError("grid must include at least one integer value.")
     return [int(value) for value in values]
+
+
+def parse_tip_adapter_grids(args):
+    if args.tip_adapter_beta_grid is None and args.tip_adapter_alpha_grid is None:
+        return [], []
+    if args.tip_adapter_beta_grid is None or args.tip_adapter_alpha_grid is None:
+        raise ValueError("Tip-Adapter requires both --tip-adapter-beta-grid and --tip-adapter-alpha-grid.")
+    beta_grid = parse_float_grid(args.tip_adapter_beta_grid)
+    alpha_grid = parse_float_grid(args.tip_adapter_alpha_grid)
+    if any(beta <= 0.0 for beta in beta_grid):
+        raise ValueError("--tip-adapter-beta-grid values must be positive.")
+    if any(alpha < 0.0 for alpha in alpha_grid):
+        raise ValueError("--tip-adapter-alpha-grid values must be non-negative.")
+    return beta_grid, alpha_grid
+
+
+def validate_tip_adapter_protocol(args, beta_grid):
+    if not beta_grid:
+        return
+    if args.val_dataset != "IWildCamVal":
+        raise ValueError("The full-data Tip-Adapter control requires --val-dataset=IWildCamVal.")
+    if args.max_train_batches is not None:
+        raise ValueError("The full-data Tip-Adapter control does not allow --max-train-batches.")
+    if args.max_eval_batches is not None:
+        raise ValueError("The full-data Tip-Adapter control does not allow --max-eval-batches.")
+    if args.max_cache_examples_per_class > 0:
+        raise ValueError("The full-data Tip-Adapter control requires --max-cache-examples-per-class=0.")
 
 
 def parse_arguments():
@@ -77,6 +105,10 @@ def parse_arguments():
     parser.add_argument("--sequence-id-field", type=str, default="auto")
     parser.add_argument("--multi-prototype-k-grid", type=str, default="1")
     parser.add_argument("--multi-prototype-reduction", type=str, default="max", choices=["max", "logsumexp"])
+    parser.add_argument("--tip-adapter-beta-grid", type=str, default=None)
+    parser.add_argument("--tip-adapter-alpha-grid", type=str, default=None)
+    parser.add_argument("--tip-adapter-query-chunk-size", type=int, default=256)
+    parser.add_argument("--tip-adapter-cache-chunk-size", type=int, default=16384)
     parser.add_argument("--audit-metadata", action="store_true")
     parser.add_argument("--report-key-ablation-candidates", action="store_true")
     parser.add_argument("--stp-diagnostics-report", type=str, default=None)
@@ -214,6 +246,22 @@ def prototype_logits(features, prototypes, present_mask, beta):
     return logits
 
 
+def build_tip_adapter_logits_by_beta(features, cache_features, cache_labels, num_classes, beta_grid, args):
+    return {
+        float(beta): tip_adapter_cache_logits(
+            features,
+            cache_features,
+            cache_labels,
+            num_classes=num_classes,
+            beta=beta,
+            query_chunk_size=args.tip_adapter_query_chunk_size,
+            cache_chunk_size=args.tip_adapter_cache_chunk_size,
+            device=args.device,
+        )
+        for beta in beta_grid
+    }
+
+
 def concept_logits(features, classification_head):
     if classification_head is None:
         return None
@@ -256,10 +304,17 @@ def confidence_gate(base_logits, mode, strength):
     return (1.0 + strength * (uncertainty.clamp(0.0, 1.0) - 0.5)).clamp_min(0.0).unsqueeze(1)
 
 
-def build_candidate_predictions(base_logits, prototype_raw_logits_by_k, concept_raw_logits, class_priors, tail_weights_by_gamma, row, metadata=None, sequence_field_index=None):
+def build_candidate_predictions(base_logits, prototype_raw_logits_by_k, concept_raw_logits, class_priors, tail_weights_by_gamma, row, metadata=None, sequence_field_index=None, tip_cache_logits_by_beta=None):
     head = row["head"]
     if head == "default":
         return base_logits
+    if head == "tip_adapter":
+        if tip_cache_logits_by_beta is None:
+            raise ValueError("Tip-Adapter requires cache logits.")
+        tip_beta = float(row["tip_beta"])
+        if tip_beta not in tip_cache_logits_by_beta:
+            raise ValueError(f"No Tip-Adapter cache logits were built for beta={tip_beta:g}.")
+        return base_logits + float(row["tip_alpha"]) * tip_cache_logits_by_beta[tip_beta]
 
     prototype_scale = float(row.get("prototype_scale", 0.0))
     tau = float(row.get("tau", 0.0))
@@ -304,7 +359,7 @@ def build_candidate_predictions(base_logits, prototype_raw_logits_by_k, concept_
     raise ValueError(f"Unsupported candidate head: {head}")
 
 
-def evaluate_candidate(dataset, base_logits, prototype_raw_logits_by_k, concept_raw_logits, labels, metadata, args, class_priors, tail_weights_by_gamma, row, sequence_field_index=None):
+def evaluate_candidate(dataset, base_logits, prototype_raw_logits_by_k, concept_raw_logits, labels, metadata, args, class_priors, tail_weights_by_gamma, row, sequence_field_index=None, tip_cache_logits_by_beta=None):
     predictions = build_candidate_predictions(
         base_logits,
         prototype_raw_logits_by_k,
@@ -314,6 +369,7 @@ def evaluate_candidate(dataset, base_logits, prototype_raw_logits_by_k, concept_
         row,
         metadata=metadata,
         sequence_field_index=sequence_field_index,
+        tip_cache_logits_by_beta=tip_cache_logits_by_beta,
     )
     return metrics_from_logits(dataset, predictions, labels, metadata, args)
 
@@ -336,7 +392,7 @@ def write_stp_diagnostics(path, split_name, labels, frame_logits, stp_logits, tr
     return diagnostics
 
 
-def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, include_concept, sctr_strength_grid=None, sctr_tail_protection_grid=None):
+def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, include_concept, sctr_strength_grid=None, sctr_tail_protection_grid=None, tip_beta_grid=None, tip_alpha_grid=None):
     sctr_strength_grid = [0.0] if sctr_strength_grid is None else sctr_strength_grid
     sctr_tail_protection_grid = [1.0] if sctr_tail_protection_grid is None else sctr_tail_protection_grid
     rows = [{
@@ -445,10 +501,27 @@ def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mo
                             "sctr_tail_protection": float(tail_protection),
                             "concept_beta": None,
                         })
+    for tip_beta in ([] if tip_beta_grid is None else tip_beta_grid):
+        for tip_alpha in ([] if tip_alpha_grid is None else tip_alpha_grid):
+            rows.append({
+                "head": "tip_adapter",
+                "prototype_scale": 0.0,
+                "tau": 0.0,
+                "tail_gamma": 0.0,
+                "prototype_k": 1,
+                "sequence_eta": 0.0,
+                "gate_mode": "none",
+                "gate_strength": 0.0,
+                "sctr_strength": 0.0,
+                "sctr_tail_protection": 0.0,
+                "concept_beta": None,
+                "tip_beta": float(tip_beta),
+                "tip_alpha": float(tip_alpha),
+            })
     return rows
 
 
-def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, concept_raw_logits, labels, metadata, args, prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, class_priors, tail_weights_by_gamma, sctr_strength_grid=None, sctr_tail_protection_grid=None, sequence_field_index=None):
+def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, concept_raw_logits, labels, metadata, args, prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, class_priors, tail_weights_by_gamma, sctr_strength_grid=None, sctr_tail_protection_grid=None, sequence_field_index=None, tip_beta_grid=None, tip_alpha_grid=None, tip_cache_logits_by_beta=None):
     rows = []
     best_by_head = {}
     candidate_rows = make_candidate_rows(
@@ -463,6 +536,8 @@ def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, conce
         concept_raw_logits is not None,
         sctr_strength_grid=sctr_strength_grid,
         sctr_tail_protection_grid=sctr_tail_protection_grid,
+        tip_beta_grid=tip_beta_grid,
+        tip_alpha_grid=tip_alpha_grid,
     )
     for candidate in candidate_rows:
         results = evaluate_candidate(
@@ -477,6 +552,7 @@ def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, conce
             tail_weights_by_gamma,
             candidate,
             sequence_field_index=sequence_field_index,
+            tip_cache_logits_by_beta=tip_cache_logits_by_beta,
         )
         row = {
             **candidate,
@@ -495,34 +571,55 @@ def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, conce
 
 def print_selection(rows, best_by_head, limit=16):
     ranked = sorted(rows, key=lambda row: row["score"], reverse=True)[:limit]
+    include_tip_columns = any(row["head"] == "tip_adapter" for row in rows)
     print("\n=== Tail Cache Ablation Selection on Validation ===")
-    print("| Rank | Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
-    print("| ---- | ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
+    if include_tip_columns:
+        print("| Rank | Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Tip beta | Tip alpha | Score  | Top-1  | F1-macro |")
+        print("| ---- | ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | -------- | --------- | ------ | ------ | -------- |")
+    else:
+        print("| Rank | Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
+        print("| ---- | ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
     for rank, row in enumerate(ranked, start=1):
         top1 = f"{row['top1'] * 100:.2f}%"
         f1 = "N/A" if row["F1-macro_all"] is None else f"{row['F1-macro_all'] * 100:.2f}%"
         concept_beta = "N/A" if row["concept_beta"] is None else f"{row['concept_beta']:g}"
-        print(
+        common = (
             f"| {rank:<4} | {row['head']:<17} | {row['prototype_scale']:<5g} | {row['prototype_k']:<1d} | "
             f"{row['sequence_eta']:<7g} | {row['sctr_strength']:<10g} | {row['sctr_tail_protection']:<12g} | {row['tau']:<4g} | {row['tail_gamma']:<10g} | {row['gate_mode']:<8} | {row['gate_strength']:<8g} | "
-            f"{concept_beta:<12} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |"
+            f"{concept_beta:<12}"
         )
+        if include_tip_columns:
+            tip_beta = "N/A" if row.get("tip_beta") is None else f"{row['tip_beta']:g}"
+            tip_alpha = "N/A" if row.get("tip_alpha") is None else f"{row['tip_alpha']:g}"
+            print(f"{common} | {tip_beta:<8} | {tip_alpha:<9} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |")
+        else:
+            print(f"{common} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |")
 
     print("\n=== Best by Ablation Head ===")
-    print("| Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
-    print("| ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
-    for head in ("default", "prototype", "prototype_tau", "sctr", "concept", "concept_prototype"):
+    if include_tip_columns:
+        print("| Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Tip beta | Tip alpha | Score  | Top-1  | F1-macro |")
+        print("| ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | -------- | --------- | ------ | ------ | -------- |")
+    else:
+        print("| Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
+        print("| ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
+    for head in ("default", "tip_adapter", "prototype", "prototype_tau", "sctr", "concept", "concept_prototype"):
         row = best_by_head.get(head)
         if row is None:
             continue
         top1 = f"{row['top1'] * 100:.2f}%"
         f1 = "N/A" if row["F1-macro_all"] is None else f"{row['F1-macro_all'] * 100:.2f}%"
         concept_beta = "N/A" if row["concept_beta"] is None else f"{row['concept_beta']:g}"
-        print(
+        common = (
             f"| {head:<17} | {row['prototype_scale']:<5g} | {row['prototype_k']:<1d} | "
             f"{row['sequence_eta']:<7g} | {row['sctr_strength']:<10g} | {row['sctr_tail_protection']:<12g} | {row['tau']:<4g} | {row['tail_gamma']:<10g} | {row['gate_mode']:<8} | {row['gate_strength']:<8g} | "
-            f"{concept_beta:<12} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |"
+            f"{concept_beta:<12}"
         )
+        if include_tip_columns:
+            tip_beta = "N/A" if row.get("tip_beta") is None else f"{row['tip_beta']:g}"
+            tip_alpha = "N/A" if row.get("tip_alpha") is None else f"{row['tip_alpha']:g}"
+            print(f"{common} | {tip_beta:<8} | {tip_alpha:<9} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |")
+        else:
+            print(f"{common} | {row['score']:<6.4f} | {top1:<6} | {f1:<8} |")
 
 
 def write_selection_output(path, val_dataset, best_metric, best_by_head):
@@ -610,6 +707,8 @@ def main(args):
         raise ValueError("--load must point to a FLYP CLIPEncoder checkpoint.")
     if args.val_dataset == "IWildCamOOD":
         raise ValueError("IWildCamOOD is final-test-only and cannot be used for cache hyperparameter selection.")
+    tip_beta_grid, tip_alpha_grid = parse_tip_adapter_grids(args)
+    validate_tip_adapter_protocol(args, tip_beta_grid)
     ensure_open_clip_for_flyp(args.model)
 
     random.seed(args.seed)
@@ -693,6 +792,16 @@ def main(args):
             reduction=args.multi_prototype_reduction,
         )
     val_concept_logits = concept_logits(val_features["features"], concept_head)
+    val_tip_cache_logits_by_beta = build_tip_adapter_logits_by_beta(
+        val_features["features"],
+        cache_features,
+        cache_labels,
+        num_classes,
+        tip_beta_grid,
+        args,
+    )
+    if tip_beta_grid:
+        print(f"Built full-data Tip-Adapter cache logits for {len(tip_beta_grid)} beta values.")
     best_by_head, selection_rows = select_adapter_params(
         val_dataset,
         val_base_logits,
@@ -714,6 +823,9 @@ def main(args):
         sctr_strength_grid=sctr_strength_grid,
         sctr_tail_protection_grid=sctr_tail_protection_grid,
         sequence_field_index=sequence_field_index,
+        tip_beta_grid=tip_beta_grid,
+        tip_alpha_grid=tip_alpha_grid,
+        tip_cache_logits_by_beta=val_tip_cache_logits_by_beta,
     )
     print_selection(selection_rows, best_by_head)
     if args.selection_output is not None:
@@ -732,6 +844,7 @@ def main(args):
         base_logits = val_base_logits if dataset_name == args.val_dataset else default_logits(features["features"], classification_head)
         if dataset_name == args.val_dataset:
             proto_logits_by_k = val_prototype_logits_by_k
+            tip_cache_logits_by_beta = val_tip_cache_logits_by_beta
         else:
             proto_logits_by_k = {1: prototype_logits(features["features"], prototypes, present_mask, beta=1.0)}
             for prototype_k in prototype_k_grid:
@@ -744,6 +857,14 @@ def main(args):
                     beta=1.0,
                     reduction=args.multi_prototype_reduction,
                 )
+            tip_cache_logits_by_beta = build_tip_adapter_logits_by_beta(
+                features["features"],
+                cache_features,
+                cache_labels,
+                num_classes,
+                tip_beta_grid,
+                args,
+            )
         cd_logits = val_concept_logits if dataset_name == args.val_dataset else concept_logits(features["features"], concept_head)
         if args.stp_diagnostics_report is not None and dataset_name == args.stp_diagnostics_split:
             stp_row = best_by_head.get("prototype")
@@ -760,6 +881,7 @@ def main(args):
                 frame_row,
                 metadata=features["metadata"],
                 sequence_field_index=sequence_field_index,
+                tip_cache_logits_by_beta=tip_cache_logits_by_beta,
             )
             stp_logits = build_candidate_predictions(
                 base_logits,
@@ -770,6 +892,7 @@ def main(args):
                 stp_row,
                 metadata=features["metadata"],
                 sequence_field_index=sequence_field_index,
+                tip_cache_logits_by_beta=tip_cache_logits_by_beta,
             )
             diagnostics = write_stp_diagnostics(
                 args.stp_diagnostics_report,
@@ -794,7 +917,7 @@ def main(args):
                     f"stp_diagnostics/{dataset_name}/frame_wrong_stp_correct": diagnostics.frame_wrong_stp_correct,
                     f"stp_diagnostics/{dataset_name}/frame_correct_stp_wrong": diagnostics.frame_correct_stp_wrong,
                 })
-        for head_name in ("default", "prototype", "prototype_tau", "sctr", "concept", "concept_prototype"):
+        for head_name in ("default", "tip_adapter", "prototype", "prototype_tau", "sctr", "concept", "concept_prototype"):
             best = best_by_head.get(head_name)
             if best is None:
                 continue
@@ -810,6 +933,7 @@ def main(args):
                 tail_weights_by_gamma,
                 best,
                 sequence_field_index=sequence_field_index,
+                tip_cache_logits_by_beta=tip_cache_logits_by_beta,
             )
             top1 = results.get("top1")
             f1_macro = results.get("F1-macro_all")
@@ -818,7 +942,7 @@ def main(args):
                 print(f"  {dataset_name} {head_name} F1-macro_all: {f1_macro:.4f}")
             summary_rows.append((dataset_name, head_name, top1, f1_macro))
             if wandb is not None:
-                wandb.log({
+                log_payload = {
                     f"tail_cache/{dataset_name}/{head_name}/top1": top1,
                     f"tail_cache/{dataset_name}/{head_name}/f1_macro": f1_macro,
                     f"tail_cache/{head_name}/prototype_scale": best["prototype_scale"],
@@ -830,7 +954,13 @@ def main(args):
                     f"tail_cache/{head_name}/sctr_strength": best["sctr_strength"],
                     f"tail_cache/{head_name}/sctr_tail_protection": best["sctr_tail_protection"],
                     f"tail_cache/{head_name}/concept_beta": best["concept_beta"],
-                })
+                }
+                if head_name == "tip_adapter":
+                    log_payload.update({
+                        f"tail_cache/{head_name}/tip_beta": best["tip_beta"],
+                        f"tail_cache/{head_name}/tip_alpha": best["tip_alpha"],
+                    })
+                wandb.log(log_payload)
         for label, candidate in key_ablation_rows:
             results = evaluate_candidate(
                 dataset,
