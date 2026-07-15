@@ -15,6 +15,19 @@ class BootstrapInterval:
 
 
 @dataclass(frozen=True, slots=True)
+class PairedSequenceBootstrap:
+    low: float
+    delta: float
+    high: float
+    positive_delta_fraction: float
+    median_class_coverage: float
+    minimum_class_coverage: float
+    stability_low: float | None
+    stability_high: float | None
+    stability_sample_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class StratifiedMacroF1:
     label: str
     examples: int
@@ -129,6 +142,53 @@ def _bootstrap_delta(
         )
     quantiles = torch.quantile(deltas, torch.tensor([0.025, 0.975]))
     return BootstrapInterval(low=quantiles[0].item(), delta=point_delta, high=quantiles[1].item())
+
+
+def paired_sequence_bootstrap(
+    *,
+    labels: torch.Tensor,
+    reference_predictions: torch.Tensor,
+    candidate_predictions: torch.Tensor,
+    metadata: Sequence[torch.Tensor],
+    sequence_field_index: int | None,
+    bootstrap_samples: int,
+    seed: int,
+) -> PairedSequenceBootstrap:
+    if labels.ndim != 1 or reference_predictions.shape != labels.shape or candidate_predictions.shape != labels.shape:
+        raise ValueError("Paired bootstrap tensors must describe the same examples.")
+    if bootstrap_samples <= 0:
+        raise ValueError("bootstrap_samples must be positive.")
+    num_classes = int(torch.maximum(labels.max(), torch.maximum(reference_predictions.max(), candidate_predictions.max())).item()) + 1
+    groups = _sequence_groups(metadata, sequence_field_index, labels.shape[0])
+    original_supported_classes = max(int(labels.unique().numel()), 1)
+    point_delta = _macro_f1(labels, candidate_predictions, num_classes) - _macro_f1(labels, reference_predictions, num_classes)
+    generator = torch.Generator().manual_seed(seed)
+    deltas = torch.empty(bootstrap_samples)
+    coverages = torch.empty(bootstrap_samples)
+    for sample_index in range(bootstrap_samples):
+        group_indices = torch.randint(len(groups), (len(groups),), generator=generator)
+        sampled_rows = torch.tensor([row for group_index in group_indices.tolist() for row in groups[group_index]])
+        sampled_labels = labels[sampled_rows]
+        deltas[sample_index] = _macro_f1(sampled_labels, candidate_predictions[sampled_rows], num_classes) - _macro_f1(
+            sampled_labels,
+            reference_predictions[sampled_rows],
+            num_classes,
+        )
+        coverages[sample_index] = sampled_labels.unique().numel() / original_supported_classes
+    quantiles = torch.quantile(deltas, torch.tensor([0.025, 0.975]))
+    stability_deltas = deltas[coverages >= 0.9]
+    stability_quantiles = None if stability_deltas.numel() == 0 else torch.quantile(stability_deltas, torch.tensor([0.025, 0.975]))
+    return PairedSequenceBootstrap(
+        low=quantiles[0].item(),
+        delta=point_delta,
+        high=quantiles[1].item(),
+        positive_delta_fraction=(deltas > 0.0).float().mean().item(),
+        median_class_coverage=coverages.median().item(),
+        minimum_class_coverage=coverages.min().item(),
+        stability_low=None if stability_quantiles is None else stability_quantiles[0].item(),
+        stability_high=None if stability_quantiles is None else stability_quantiles[1].item(),
+        stability_sample_count=int(stability_deltas.numel()),
+    )
 
 
 def _breakdown(

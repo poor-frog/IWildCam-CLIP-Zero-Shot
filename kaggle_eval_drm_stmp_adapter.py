@@ -31,8 +31,13 @@ STP_DIAGNOSTICS_BOOTSTRAP_SAMPLES = os.environ.get("DRM_STP_DIAGNOSTICS_BOOTSTRA
 SCTR_STRENGTH_GRID = os.environ.get("DRM_SCTR_STRENGTH_GRID", "0.25,0.5,1")
 SCTR_TAIL_PROTECTION_GRID = os.environ.get("DRM_SCTR_TAIL_PROTECTION_GRID", "0,0.5,1,2")
 WISE_ALPHA_GRID = os.environ.get("DRM_WISE_ALPHA_GRID", "")
+WISE_EVAL_ALPHA = os.environ.get("DRM_WISE_EVAL_ALPHA", "")
 WISE_SELECTION_DIR = os.environ.get("DRM_WISE_SELECTION_DIR", "/kaggle/working/drm_wise_stp_selection")
 WISE_WANDB_RUN_PREFIX = os.environ.get("DRM_WISE_WANDB_RUN_PREFIX", "drm-wise-stp-vitb16-iwildcamval")
+LOO_BCPD_STRENGTH_GRID = os.environ.get("DRM_LOO_BCPD_STRENGTH_GRID", "0")
+LOO_BCPD_DIAGNOSTICS_REPORT = os.environ.get("DRM_LOO_BCPD_DIAGNOSTICS_REPORT", "")
+LOO_BCPD_DIAGNOSTICS_SPLIT = os.environ.get("DRM_LOO_BCPD_DIAGNOSTICS_SPLIT", "IWildCamVal")
+SUMMARY_HEAD = os.environ.get("DRM_SUMMARY_HEAD", "")
 WANDB_RUN_NAME = os.environ.get(
     "DRM_SCTR_WANDB_RUN_NAME",
     "drm-sctr-v1-route0p25-0p5-1-tail0-0p5-1-2-vitb16-iwildcamval",
@@ -113,6 +118,15 @@ def assert_repo_supports_drm_wise_stp_eval(repo_root):
     if not driver_path.is_file() or "--selection-output" not in evaluator_path.read_text(encoding="utf-8"):
         raise DrmConceptEvalSupportError(
             "The cloned repo lacks the DRM + WiSE + STP selection driver. Push the latest code before rerunning."
+        )
+
+
+def assert_repo_supports_loo_bcpd_eval(repo_root):
+    evaluator_path = Path(repo_root) / "src" / "eval_tail_cache.py"
+    method_path = Path(repo_root) / "src" / "models" / "loo_bcpd.py"
+    if not method_path.is_file() or "--loo-bcpd-strength-grid" not in evaluator_path.read_text(encoding="utf-8"):
+        raise DrmConceptEvalSupportError(
+            "The cloned repo lacks LOO-BCPD evaluation support. Push the latest code before rerunning."
         )
 
 
@@ -239,6 +253,8 @@ def main():
     patch_iwildcam_val()
     if WISE_ALPHA_GRID:
         assert_repo_supports_drm_wise_stp_eval(repo_root)
+    if any(float(value.strip()) > 0.0 for value in LOO_BCPD_STRENGTH_GRID.split(",") if value.strip()):
+        assert_repo_supports_loo_bcpd_eval(repo_root)
 
     data_location = prepare_iwildcam_layout(repo_root)
     drm_checkpoint = find_drm_checkpoint()
@@ -268,6 +284,7 @@ def main():
         "--sequence-id-field=auto",
         f"--multi-prototype-k-grid={MULTI_PROTOTYPE_K_GRID}",
         f"--multi-prototype-reduction={MULTI_PROTOTYPE_REDUCTION}",
+        f"--loo-bcpd-strength-grid={LOO_BCPD_STRENGTH_GRID}",
         "--audit-metadata",
         "--report-key-ablation-candidates",
         "--max-cache-examples-per-class=0",
@@ -275,6 +292,15 @@ def main():
         f"--workers={WORKERS}",
         "--device=auto",
     ]
+    if WISE_EVAL_ALPHA:
+        command.append(f"--wise-eval-alpha={WISE_EVAL_ALPHA}")
+    if LOO_BCPD_DIAGNOSTICS_REPORT:
+        command.extend([
+            f"--loo-bcpd-diagnostics-report={LOO_BCPD_DIAGNOSTICS_REPORT}",
+            f"--loo-bcpd-diagnostics-split={LOO_BCPD_DIAGNOSTICS_SPLIT}",
+        ])
+    if SUMMARY_HEAD:
+        command.append(f"--summary-head={SUMMARY_HEAD}")
     if WISE_ALPHA_GRID:
         command = [
             sys.executable,
@@ -309,7 +335,7 @@ def main():
             command.append(f"--wandb-run-name={WANDB_RUN_NAME}")
     else:
         command.append("--no-wandb")
-    mode_name = "DRM + WiSE + STP two-phase evaluation" if WISE_ALPHA_GRID else "DRM + SCTR validation-selected evaluation"
+    mode_name = "DRM + WiSE + STP two-phase evaluation" if WISE_ALPHA_GRID else "DRM prototype evaluation"
     print(f"Running {mode_name}:")
     print(" ".join(str(part) for part in command))
     run(command, cwd=repo_root)

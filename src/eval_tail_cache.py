@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import copy
 import json
 import os
@@ -25,8 +26,14 @@ from src.models.stmp_adapter import (
     print_metadata_audit,
     resolve_metadata_field_index,
 )
+from src.models.loo_bcpd import (
+    build_loo_bcpd_logits,
+    build_loo_linear_logits,
+    deterministic_derangement,
+    shuffled_sequence_groups,
+)
 from src.models.sctr import apply_tail_protective_sctr
-from src.models.stp_diagnostics import build_stp_diagnostics
+from src.models.stp_diagnostics import build_stp_diagnostics, paired_sequence_bootstrap
 from src.models.tail_prototype import apply_tail_class_weights, tail_class_weights
 from src.models.tip_adapter import tip_adapter_cache_logits
 from src.train_coop import build_eval_dataset, log_wandb_summary
@@ -115,6 +122,9 @@ def parse_arguments():
     parser.add_argument("--sequence-consensus-grid", type=str, default="0")
     parser.add_argument("--sctr-strength-grid", type=str, default="0")
     parser.add_argument("--sctr-tail-protection-grid", type=str, default="1")
+    parser.add_argument("--loo-bcpd-strength-grid", type=str, default="0")
+    parser.add_argument("--loo-bcpd-diagnostics-report", type=str, default=None)
+    parser.add_argument("--loo-bcpd-diagnostics-split", type=str, default="IWildCamVal")
     parser.add_argument("--sequence-id-field", type=str, default="auto")
     parser.add_argument("--multi-prototype-k-grid", type=str, default="1")
     parser.add_argument("--multi-prototype-reduction", type=str, default="max", choices=["max", "logsumexp"])
@@ -268,6 +278,15 @@ def build_prototypes(features, labels, num_classes):
     return prototypes, present
 
 
+def class_mapping_checksum(classnames, classifier):
+    if classifier.weight.shape[0] != len(classnames):
+        raise ValueError(
+            f"Classifier rows ({classifier.weight.shape[0]}) do not match dataset classes ({len(classnames)})."
+        )
+    encoded = "\n".join(f"{index}:{name}" for index, name in enumerate(classnames)).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def prototype_logits(features, prototypes, present_mask, beta):
     logits = float(beta) * normalize_features(features) @ prototypes.t()
     if not present_mask.all():
@@ -341,7 +360,7 @@ def confidence_gate(base_logits, mode, strength):
     return (1.0 + strength * (uncertainty.clamp(0.0, 1.0) - 0.5)).clamp_min(0.0).unsqueeze(1)
 
 
-def build_candidate_predictions(base_logits, prototype_raw_logits_by_k, concept_raw_logits, class_priors, tail_weights_by_gamma, row, metadata=None, sequence_field_index=None, tip_cache_logits_by_config=None):
+def build_candidate_predictions(base_logits, prototype_raw_logits_by_k, concept_raw_logits, class_priors, tail_weights_by_gamma, row, metadata=None, sequence_field_index=None, tip_cache_logits_by_config=None, loo_bcpd_logits_by_strength=None):
     head = row["head"]
     if head == "default":
         return base_logits
@@ -354,6 +373,13 @@ def build_candidate_predictions(base_logits, prototype_raw_logits_by_k, concept_
         if cache_key not in tip_cache_logits_by_config:
             raise ValueError(f"No Tip-Adapter cache logits were built for support_shots={tip_support_shots}, beta={tip_beta:g}.")
         return base_logits + float(row["tip_alpha"]) * tip_cache_logits_by_config[cache_key]
+    if head == "loo_bcpd":
+        if loo_bcpd_logits_by_strength is None:
+            raise ValueError("LOO-BCPD requires precomputed logits.")
+        strength = float(row["loo_bcpd_strength"])
+        if strength not in loo_bcpd_logits_by_strength:
+            raise ValueError(f"No LOO-BCPD logits were built for strength={strength:g}.")
+        return loo_bcpd_logits_by_strength[strength]
 
     prototype_scale = float(row.get("prototype_scale", 0.0))
     tau = float(row.get("tau", 0.0))
@@ -398,7 +424,7 @@ def build_candidate_predictions(base_logits, prototype_raw_logits_by_k, concept_
     raise ValueError(f"Unsupported candidate head: {head}")
 
 
-def evaluate_candidate(dataset, base_logits, prototype_raw_logits_by_k, concept_raw_logits, labels, metadata, args, class_priors, tail_weights_by_gamma, row, sequence_field_index=None, tip_cache_logits_by_config=None):
+def evaluate_candidate(dataset, base_logits, prototype_raw_logits_by_k, concept_raw_logits, labels, metadata, args, class_priors, tail_weights_by_gamma, row, sequence_field_index=None, tip_cache_logits_by_config=None, loo_bcpd_logits_by_strength=None):
     predictions = build_candidate_predictions(
         base_logits,
         prototype_raw_logits_by_k,
@@ -409,6 +435,7 @@ def evaluate_candidate(dataset, base_logits, prototype_raw_logits_by_k, concept_
         metadata=metadata,
         sequence_field_index=sequence_field_index,
         tip_cache_logits_by_config=tip_cache_logits_by_config,
+        loo_bcpd_logits_by_strength=loo_bcpd_logits_by_strength,
     )
     return metrics_from_logits(dataset, predictions, labels, metadata, args)
 
@@ -431,7 +458,121 @@ def write_stp_diagnostics(path, split_name, labels, frame_logits, stp_logits, tr
     return diagnostics
 
 
-def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, include_concept, sctr_strength_grid=None, sctr_tail_protection_grid=None, tip_beta_grid=None, tip_alpha_grid=None, tip_support_shots_grid=None):
+def _macro_f1(labels, predictions, num_classes):
+    if labels.numel() == 0:
+        return 0.0
+    encoded = labels * num_classes + predictions
+    confusion = torch.bincount(encoded, minlength=num_classes * num_classes).reshape(num_classes, num_classes).float()
+    true_positives = confusion.diag()
+    denominators = confusion.sum(dim=0) + confusion.sum(dim=1)
+    f1 = 2.0 * true_positives / denominators.clamp_min(1.0)
+    present = confusion.sum(dim=1) > 0
+    return f1[present].mean().item() if present.any() else 0.0
+
+
+def _tail_bin_rows(labels, logits_by_name, train_class_counts):
+    num_classes = logits_by_name["tpa"].shape[1]
+    label_counts = train_class_counts.to(device=labels.device)[labels]
+    bins = (
+        ("tail_1_20", label_counts <= 20),
+        ("medium_21_100", (label_counts >= 21) & (label_counts <= 100)),
+        ("head_101_plus", label_counts >= 101),
+    )
+    rows = []
+    for name, mask in bins:
+        active_classes = int(labels[mask].unique().numel()) if mask.any() else 0
+        metrics = {
+            method: _macro_f1(labels[mask], logits.argmax(dim=1)[mask], num_classes)
+            for method, logits in logits_by_name.items()
+        }
+        rows.append((name, int(mask.sum().item()), active_classes, metrics))
+    return rows
+
+
+def write_loo_bcpd_diagnostics(path, split_name, dataset, args, labels, metadata, sequence_field_index, train_class_counts, class_checksum, logits_by_name, selected_result, shuffled, bootstrap_samples, seed):
+    bcpd_predictions = logits_by_name["loo_bcpd"].argmax(dim=1)
+    comparison_rows = []
+    for method, logits in logits_by_name.items():
+        if method == "loo_bcpd":
+            continue
+        bootstrap = paired_sequence_bootstrap(
+            labels=labels,
+            reference_predictions=logits.argmax(dim=1),
+            candidate_predictions=bcpd_predictions,
+            metadata=metadata,
+            sequence_field_index=sequence_field_index,
+            bootstrap_samples=bootstrap_samples,
+            seed=seed,
+        )
+        comparison_rows.append((method, bootstrap))
+    metric_rows = {
+        method: metrics_from_logits(dataset, logits, labels, metadata, args)
+        for method, logits in logits_by_name.items()
+    }
+    changed_predictions = int((logits_by_name["tpa"].argmax(dim=1) != bcpd_predictions).sum().item())
+    tpa_predictions = logits_by_name["tpa"].argmax(dim=1)
+    corrected = int(((tpa_predictions != labels) & (bcpd_predictions == labels)).sum().item())
+    regressed = int(((tpa_predictions == labels) & (bcpd_predictions != labels)).sum().item())
+    lines = [
+        f"# LOO-BCPD Diagnostics: {split_name}",
+        "",
+        "## Configuration",
+        "",
+        f"- Class mapping SHA-256: `{class_checksum}`.",
+        f"- Valid bursts: {selected_result.valid_burst_count}; corrected frames: {selected_result.corrected_frame_count}.",
+        f"- Burst-shuffle changed-frame fraction: {shuffled.changed_frame_fraction:.4f}; unavailable groups: {shuffled.unavailable_group_count}.",
+        "",
+        "## Overall",
+        "",
+        "| Method | Top-1 | Macro-F1 |",
+        "| --- | ---: | ---: |",
+    ]
+    for method, metrics in metric_rows.items():
+        lines.append(f"| {method} | {metrics.get('top1', 0.0) * 100:.2f} | {metrics.get('F1-macro_all', 0.0) * 100:.2f} |")
+    lines.extend([
+        "",
+        "## Paired Sequence Bootstrap",
+        "",
+        "| Reference | Delta BCPD-reference | 95% CI | Positive fraction | Median class coverage | Stability samples |",
+        "| --- | ---: | --- | ---: | ---: | ---: |",
+    ])
+    for method, bootstrap in comparison_rows:
+        lines.append(
+            f"| {method} | {bootstrap.delta * 100:+.2f} | [{bootstrap.low * 100:+.2f}, {bootstrap.high * 100:+.2f}] | "
+            f"{bootstrap.positive_delta_fraction:.3f} | {bootstrap.median_class_coverage:.3f} | {bootstrap.stability_sample_count} |"
+        )
+    lines.extend([
+        "",
+        "## Tail Bins",
+        "",
+        "| Bin | Frames | Supported classes | TPA F1 | BCPD F1 | Delta |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    for name, frame_count, class_count, metrics in _tail_bin_rows(labels, logits_by_name, train_class_counts):
+        lines.append(
+            f"| {name} | {frame_count} | {class_count} | {metrics['tpa'] * 100:.2f} | "
+            f"{metrics['loo_bcpd'] * 100:.2f} | {(metrics['loo_bcpd'] - metrics['tpa']) * 100:+.2f} |"
+        )
+    lines.extend([
+        "",
+        "## Aggregate Mechanism Statistics",
+        "",
+        f"- Mean responsibility entropy: {selected_result.mean_responsibility_entropy:.4f}.",
+        f"- Mean maximum responsibility: {selected_result.mean_max_responsibility:.4f}.",
+        f"- Mean effective class count: {selected_result.mean_effective_class_count:.4f}.",
+        f"- Mean LOO support mass: {selected_result.mean_support_mass:.4f}.",
+        f"- Mean tangent rotation: {selected_result.mean_rotation_degrees:.4f} degrees.",
+        f"- Mean normalization penalty: {selected_result.mean_normalization_penalty:.4f}.",
+        f"- TPA-to-BCPD changed predictions: {changed_predictions}; wrong-to-correct: {corrected}; correct-to-wrong: {regressed}.",
+        "",
+    ])
+    report_path = Path(path).expanduser()
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Saved LOO-BCPD diagnostics to {report_path}")
+
+
+def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, include_concept, sctr_strength_grid=None, sctr_tail_protection_grid=None, tip_beta_grid=None, tip_alpha_grid=None, tip_support_shots_grid=None, loo_bcpd_strength_grid=None):
     sctr_strength_grid = [0.0] if sctr_strength_grid is None else sctr_strength_grid
     sctr_tail_protection_grid = [1.0] if sctr_tail_protection_grid is None else sctr_tail_protection_grid
     rows = [{
@@ -560,10 +701,27 @@ def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mo
                     "tip_beta": float(tip_beta),
                     "tip_alpha": float(tip_alpha),
                 })
+    for strength in ([] if loo_bcpd_strength_grid is None else loo_bcpd_strength_grid):
+        rows.append({
+                "head": "loo_bcpd",
+                "prototype_scale": 50.0,
+                "tau": 0.0,
+                "tail_gamma": 0.0,
+                "prototype_k": 1,
+                "sequence_eta": 0.0,
+                "gate_mode": "none",
+                "gate_strength": 0.0,
+                "sctr_strength": 0.0,
+                "sctr_tail_protection": 0.0,
+                "concept_beta": None,
+                "loo_bcpd_strength": float(strength),
+        })
+    for row in rows:
+        row.setdefault("loo_bcpd_strength", 0.0)
     return rows
 
 
-def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, concept_raw_logits, labels, metadata, args, prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, class_priors, tail_weights_by_gamma, sctr_strength_grid=None, sctr_tail_protection_grid=None, sequence_field_index=None, tip_beta_grid=None, tip_alpha_grid=None, tip_support_shots_grid=None, tip_cache_logits_by_config=None):
+def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, concept_raw_logits, labels, metadata, args, prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, class_priors, tail_weights_by_gamma, sctr_strength_grid=None, sctr_tail_protection_grid=None, sequence_field_index=None, tip_beta_grid=None, tip_alpha_grid=None, tip_support_shots_grid=None, tip_cache_logits_by_config=None, loo_bcpd_strength_grid=None, loo_bcpd_logits_by_strength=None, train_class_counts=None):
     rows = []
     best_by_head = {}
     candidate_rows = make_candidate_rows(
@@ -581,6 +739,7 @@ def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, conce
         tip_beta_grid=tip_beta_grid,
         tip_alpha_grid=tip_alpha_grid,
         tip_support_shots_grid=tip_support_shots_grid,
+        loo_bcpd_strength_grid=loo_bcpd_strength_grid,
     )
     for candidate in candidate_rows:
         results = evaluate_candidate(
@@ -596,6 +755,7 @@ def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, conce
             candidate,
             sequence_field_index=sequence_field_index,
             tip_cache_logits_by_config=tip_cache_logits_by_config,
+            loo_bcpd_logits_by_strength=loo_bcpd_logits_by_strength,
         )
         row = {
             **candidate,
@@ -603,9 +763,36 @@ def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, conce
             "top1": float(results.get("top1", 0.0)),
             "F1-macro_all": float(results.get("F1-macro_all", 0.0)) if "F1-macro_all" in results else None,
         }
+        if row["head"] == "loo_bcpd" and train_class_counts is not None:
+            candidate_logits = build_candidate_predictions(
+                base_logits,
+                prototype_raw_logits_by_k,
+                concept_raw_logits,
+                class_priors,
+                tail_weights_by_gamma,
+                candidate,
+                metadata=metadata,
+                sequence_field_index=sequence_field_index,
+                tip_cache_logits_by_config=tip_cache_logits_by_config,
+                loo_bcpd_logits_by_strength=loo_bcpd_logits_by_strength,
+            )
+            tail_mask = train_class_counts.to(device=labels.device)[labels] <= 20
+            row["tail_macro_f1"] = _macro_f1(labels[tail_mask], candidate_logits.argmax(dim=1)[tail_mask], candidate_logits.shape[1])
+        else:
+            row["tail_macro_f1"] = None
         rows.append(row)
         current_best = best_by_head.get(row["head"])
-        if current_best is None or row["score"] > current_best["score"]:
+        if current_best is None or row["score"] > current_best["score"] + 1e-4 or (
+            abs(row["score"] - current_best["score"]) <= 1e-4
+            and row["head"] == "loo_bcpd"
+            and (
+                row["loo_bcpd_strength"] < current_best["loo_bcpd_strength"]
+                or (
+                    row["loo_bcpd_strength"] == current_best["loo_bcpd_strength"]
+                    and (row["tail_macro_f1"] or float("-inf")) > (current_best["tail_macro_f1"] or float("-inf"))
+                )
+            )
+        ):
             best_by_head[row["head"]] = row
     if not best_by_head:
         raise RuntimeError("No cache adapter candidate was evaluated.")
@@ -646,7 +833,7 @@ def print_selection(rows, best_by_head, limit=16):
     else:
         print("| Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
         print("| ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
-    for head in ("default", "tip_adapter", "prototype", "prototype_tau", "sctr", "concept", "concept_prototype"):
+    for head in ("default", "tip_adapter", "prototype", "prototype_tau", "loo_bcpd", "sctr", "concept", "concept_prototype"):
         row = best_by_head.get(head)
         if row is None:
             continue
@@ -801,6 +988,8 @@ def main(args):
     print(f"Built tail cache with {cache_features.shape[0]} examples across {int((counts > 0).sum().item())}/{num_classes} classes.")
 
     classification_head = get_cached_flyp_zeroshot_classifier(args, encoder)
+    class_checksum = class_mapping_checksum(train_data.classnames, classification_head)
+    print(f"LOO-BCPD class mapping checksum={class_checksum}")
     concept_head = None
     if args.cd_path is not None:
         from src.eval_drm_blend import build_drm_classifiers
@@ -817,6 +1006,9 @@ def main(args):
     sctr_strength_grid = parse_float_grid(args.sctr_strength_grid)
     sctr_tail_protection_grid = parse_float_grid(args.sctr_tail_protection_grid)
     concept_beta_grid = parse_float_grid(args.concept_beta_grid)
+    loo_bcpd_strength_grid = parse_float_grid(args.loo_bcpd_strength_grid)
+    if any(strength < 0.0 or strength > 1.0 for strength in loo_bcpd_strength_grid):
+        raise ValueError("--loo-bcpd-strength-grid values must be in [0, 1].")
     tail_weights_by_gamma = {
         float(gamma): tail_class_weights(counts, gamma, max_weight=args.tail_weight_max)
         for gamma in tail_gamma_grid
@@ -855,6 +1047,23 @@ def main(args):
     )
     if tip_beta_grid:
         print(f"Built Tip-Adapter cache logits for {len(tip_support_shots_grid)} support-shot settings and {len(tip_beta_grid)} beta values.")
+    val_tpa_logits = val_base_logits + 50.0 * val_prototype_logits_by_k[1]
+    val_loo_bcpd_results = {
+        float(strength): build_loo_bcpd_logits(
+            val_features["features"],
+            val_base_logits,
+            prototypes,
+            val_features["metadata"],
+            sequence_field_index=sequence_field_index,
+            prototype_scale=50.0,
+            strength=float(strength),
+            cached_tpa_logits=val_tpa_logits,
+        )
+        for strength in loo_bcpd_strength_grid
+    }
+    val_loo_bcpd_logits_by_strength = {
+        strength: result.logits for strength, result in val_loo_bcpd_results.items()
+    }
     best_by_head, selection_rows = select_adapter_params(
         val_dataset,
         val_base_logits,
@@ -880,6 +1089,9 @@ def main(args):
         tip_alpha_grid=tip_alpha_grid,
         tip_support_shots_grid=tip_support_shots_grid,
         tip_cache_logits_by_config=val_tip_cache_logits_by_config,
+        loo_bcpd_strength_grid=loo_bcpd_strength_grid,
+        loo_bcpd_logits_by_strength=val_loo_bcpd_logits_by_strength,
+        train_class_counts=counts,
     )
     print_selection(selection_rows, best_by_head)
     if args.selection_output is not None:
@@ -892,6 +1104,7 @@ def main(args):
     summary_rows = []
     key_ablation_summary_rows = []
     stp_diagnostics_written = False
+    loo_bcpd_diagnostics_written = False
     for dataset_name in args.eval_datasets:
         print(f"Evaluating tail cache on {dataset_name}...")
         dataset = build_eval_dataset(dataset_name, encoder, args)
@@ -902,6 +1115,7 @@ def main(args):
         if dataset_name == args.val_dataset:
             proto_logits_by_k = val_prototype_logits_by_k
             tip_cache_logits_by_config = val_tip_cache_logits_by_config
+            loo_bcpd_results = val_loo_bcpd_results
         else:
             proto_logits_by_k = {1: prototype_logits(features["features"], prototypes, present_mask, beta=1.0)}
             for prototype_k in prototype_k_grid:
@@ -923,7 +1137,97 @@ def main(args):
                 selected_tip_support_shots_grid,
                 args,
             )
+            tpa_logits = base_logits + 50.0 * proto_logits_by_k[1]
+            loo_bcpd_results = {
+                float(strength): build_loo_bcpd_logits(
+                    features["features"],
+                    base_logits,
+                    prototypes,
+                    features["metadata"],
+                    sequence_field_index=sequence_field_index,
+                    prototype_scale=50.0,
+                    strength=float(strength),
+                    cached_tpa_logits=tpa_logits,
+                )
+                for strength in loo_bcpd_strength_grid
+            }
         cd_logits = val_concept_logits if dataset_name == args.val_dataset else concept_logits(features["features"], concept_head)
+        loo_bcpd_logits_by_strength = {strength: result.logits for strength, result in loo_bcpd_results.items()}
+        if args.loo_bcpd_diagnostics_report is not None and dataset_name == args.loo_bcpd_diagnostics_split:
+            selected_bcpd = best_by_head.get("loo_bcpd")
+            if selected_bcpd is None:
+                raise ValueError("LOO-BCPD diagnostics require a selected LOO-BCPD candidate.")
+            selected_strength = float(selected_bcpd["loo_bcpd_strength"])
+            selected_result = loo_bcpd_results[selected_strength]
+            metadata_fields = metadata_fields_from_dataset(dataset)
+            location_field_index = resolve_metadata_field_index(
+                metadata_fields,
+                "auto",
+                ["location", "camera", "camera_id", "location_id"],
+            )
+            hour_field_index = resolve_metadata_field_index(metadata_fields, "auto", ["hour"])
+            shuffled = shuffled_sequence_groups(
+                features["metadata"],
+                sequence_field_index,
+                location_field_index,
+                hour_field_index,
+                args.seed,
+            )
+            tpa_logits = base_logits + 50.0 * proto_logits_by_k[1]
+            derangement = deterministic_derangement(num_classes, args.seed).to(features["features"].device)
+            linear_result = build_loo_linear_logits(
+                features["features"], base_logits, prototypes, features["metadata"],
+                sequence_field_index=sequence_field_index, prototype_scale=50.0, strength=selected_strength,
+                cached_tpa_logits=tpa_logits,
+            )
+            permuted_result = build_loo_bcpd_logits(
+                features["features"], base_logits, prototypes, features["metadata"],
+                sequence_field_index=sequence_field_index, prototype_scale=50.0, strength=selected_strength,
+                cached_tpa_logits=tpa_logits, responsibility_permutation=derangement,
+            )
+            shuffled_result = build_loo_bcpd_logits(
+                features["features"], base_logits, prototypes, features["metadata"],
+                sequence_field_index=sequence_field_index, prototype_scale=50.0, strength=selected_strength,
+                cached_tpa_logits=tpa_logits, groups=shuffled.groups,
+            )
+            self_including_result = build_loo_bcpd_logits(
+                features["features"], base_logits, prototypes, features["metadata"],
+                sequence_field_index=sequence_field_index, prototype_scale=50.0, strength=selected_strength,
+                cached_tpa_logits=tpa_logits, include_target=True,
+            )
+            unconstrained_result = build_loo_bcpd_logits(
+                features["features"], base_logits, prototypes, features["metadata"],
+                sequence_field_index=sequence_field_index, prototype_scale=50.0, strength=selected_strength,
+                cached_tpa_logits=tpa_logits, variant="unconstrained",
+            )
+            diagnostics_logits = {
+                "frame": base_logits,
+                "tpa": tpa_logits,
+                "stp_mean": apply_sequence_consensus(tpa_logits, features["metadata"], sequence_field_index, eta=0.5),
+                "loo_linear": linear_result.logits,
+                "loo_bcpd": selected_result.logits,
+                "class_derangement": permuted_result.logits,
+                "burst_shuffle": shuffled_result.logits,
+                "self_including": self_including_result.logits,
+                "unconstrained_mixing": unconstrained_result.logits,
+            }
+            write_loo_bcpd_diagnostics(
+                args.loo_bcpd_diagnostics_report,
+                dataset_name,
+                dataset,
+                args,
+                features["labels"],
+                features["metadata"],
+                sequence_field_index,
+                counts,
+                class_checksum,
+                diagnostics_logits,
+                selected_result,
+                shuffled,
+                2000,
+                args.seed,
+            )
+            loo_bcpd_diagnostics_written = True
         if args.stp_diagnostics_report is not None and dataset_name == args.stp_diagnostics_split:
             stp_row = best_by_head.get("prototype")
             if stp_row is None:
@@ -975,7 +1279,7 @@ def main(args):
                     f"stp_diagnostics/{dataset_name}/frame_wrong_stp_correct": diagnostics.frame_wrong_stp_correct,
                     f"stp_diagnostics/{dataset_name}/frame_correct_stp_wrong": diagnostics.frame_correct_stp_wrong,
                 })
-        for head_name in ("default", "tip_adapter", "prototype", "prototype_tau", "sctr", "concept", "concept_prototype"):
+        for head_name in ("default", "tip_adapter", "prototype", "prototype_tau", "loo_bcpd", "sctr", "concept", "concept_prototype"):
             best = best_by_head.get(head_name)
             if best is None:
                 continue
@@ -992,6 +1296,7 @@ def main(args):
                 best,
                 sequence_field_index=sequence_field_index,
                 tip_cache_logits_by_config=tip_cache_logits_by_config,
+                loo_bcpd_logits_by_strength=loo_bcpd_logits_by_strength,
             )
             top1 = results.get("top1")
             f1_macro = results.get("F1-macro_all")
@@ -1046,6 +1351,8 @@ def main(args):
     print_key_ablation_summary(key_ablation_summary_rows)
     if args.stp_diagnostics_report is not None and not stp_diagnostics_written:
         raise ValueError(f"--stp-diagnostics-split={args.stp_diagnostics_split} is not in --eval-datasets.")
+    if args.loo_bcpd_diagnostics_report is not None and not loo_bcpd_diagnostics_written:
+        raise ValueError(f"--loo-bcpd-diagnostics-split={args.loo_bcpd_diagnostics_split} is not in --eval-datasets.")
     preferred_head = select_summary_head(best_by_head, args.summary_head)
     cache_summary_rows = [(dataset, top1, f1) for dataset, head, top1, f1 in summary_rows if head == preferred_head]
     log_wandb_summary(wandb, cache_summary_rows)

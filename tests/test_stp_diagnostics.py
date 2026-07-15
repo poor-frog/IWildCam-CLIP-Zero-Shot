@@ -59,3 +59,26 @@ def test_stp_diagnostics_sequence_lengths_group_only_matching_metadata():
 
     assert diagnostics.sequence_count == 2
     assert diagnostics.sequence_length_counts == {"singleton": 1, "short_2_4": 2, "long_5_plus": 0}
+
+
+def test_paired_sequence_bootstrap_uses_same_active_classes_for_both_methods():
+    from src.models.stp_diagnostics import paired_sequence_bootstrap
+
+    labels = torch.tensor([0, 0, 1, 2])
+    reference = torch.tensor([0, 1, 1, 2])
+    candidate = torch.tensor([0, 0, 1, 2])
+    metadata = [torch.tensor([1]), torch.tensor([1]), torch.tensor([2]), torch.tensor([3])]
+
+    bootstrap = paired_sequence_bootstrap(
+        labels=labels,
+        reference_predictions=reference,
+        candidate_predictions=candidate,
+        metadata=metadata,
+        sequence_field_index=0,
+        bootstrap_samples=100,
+        seed=3,
+    )
+
+    assert bootstrap.low <= bootstrap.delta <= bootstrap.high
+    assert 0.0 <= bootstrap.positive_delta_fraction <= 1.0
+    assert bootstrap.median_class_coverage > 0.0
