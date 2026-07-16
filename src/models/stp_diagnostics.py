@@ -1,10 +1,9 @@
-from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import torch
 
-from src.models.stmp_adapter import metadata_value
+from src.models.loo_bcpd import sequence_groups
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,17 +110,6 @@ def _macro_f1(labels: torch.Tensor, predictions: torch.Tensor, num_classes: int)
     return f1[present].mean().item() if present.any() else 0.0
 
 
-def _sequence_groups(metadata: Sequence[torch.Tensor], sequence_field_index: int | None, num_examples: int) -> tuple[tuple[int, ...], ...]:
-    if sequence_field_index is None or len(metadata) != num_examples:
-        return tuple((index,) for index in range(num_examples))
-    groups: dict[str, list[int]] = defaultdict(list)
-    for index, row in enumerate(metadata):
-        value = metadata_value(row, sequence_field_index)
-        key = f"row-{index}" if value is None else str(value)
-        groups[key].append(index)
-    return tuple(tuple(indices) for indices in groups.values())
-
-
 def _bootstrap_delta(
     labels: torch.Tensor,
     frame_predictions: torch.Tensor,
@@ -159,7 +147,7 @@ def paired_sequence_bootstrap(
     if bootstrap_samples <= 0:
         raise ValueError("bootstrap_samples must be positive.")
     num_classes = int(torch.maximum(labels.max(), torch.maximum(reference_predictions.max(), candidate_predictions.max())).item()) + 1
-    groups = _sequence_groups(metadata, sequence_field_index, labels.shape[0])
+    groups = sequence_groups(metadata, sequence_field_index, labels.shape[0])
     original_supported_classes = max(int(labels.unique().numel()), 1)
     point_delta = _macro_f1(labels, candidate_predictions, num_classes) - _macro_f1(labels, reference_predictions, num_classes)
     generator = torch.Generator().manual_seed(seed)
@@ -233,7 +221,7 @@ def build_stp_diagnostics(
     num_classes = frame_logits.shape[1]
     frame_predictions = frame_logits.argmax(dim=1)
     stp_predictions = stp_logits.argmax(dim=1)
-    groups = _sequence_groups(metadata, sequence_field_index, labels.shape[0])
+    groups = sequence_groups(metadata, sequence_field_index, labels.shape[0])
     sequence_lengths = torch.ones(labels.shape[0], dtype=torch.long)
     for group in groups:
         sequence_lengths[list(group)] = len(group)

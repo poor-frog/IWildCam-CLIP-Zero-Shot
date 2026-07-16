@@ -61,6 +61,29 @@ def test_loo_bcpd_closed_form_matches_bruteforce_and_is_tangent():
     assert torch.allclose(result.prototype_scores[0], features[0] @ brute_prototypes.t(), atol=1e-6)
 
 
+def test_unconstrained_mixing_normalizes_the_raw_displaced_prototype():
+    from src.models.loo_bcpd import build_loo_bcpd_logits, leave_one_out_support
+
+    features, prototypes, base_logits, metadata = _inputs()
+    strength = 0.7
+    result = build_loo_bcpd_logits(
+        features,
+        base_logits,
+        prototypes,
+        metadata,
+        sequence_field_index=0,
+        prototype_scale=50.0,
+        strength=strength,
+        variant="unconstrained",
+    )
+    responsibilities = F.softmax(base_logits, dim=1)
+    support = leave_one_out_support(features, responsibilities, (0, 1, 2), target_index=0)
+    raw_delta = (support.feature_sums - support.weights.unsqueeze(1) * prototypes) / (1.0 + support.weights).unsqueeze(1)
+    brute_prototypes = F.normalize(prototypes + strength * raw_delta, dim=1)
+
+    assert torch.allclose(result.prototype_scores[0], features[0] @ brute_prototypes.t(), atol=1e-6)
+
+
 def test_loo_linear_omits_only_displaced_prototype_normalization():
     from src.models.loo_bcpd import build_loo_linear_logits
 
@@ -126,6 +149,14 @@ def test_sequence_shuffle_is_deterministic_and_preserves_group_sizes():
     assert first.groups == second.groups
     assert sorted(len(group) for group in first.groups) == [2, 2, 2, 2]
     assert first.changed_frame_fraction > 0.0
+
+
+def test_missing_sequence_ids_are_not_grouped_together():
+    from src.models.loo_bcpd import sequence_groups
+
+    metadata = [None, torch.tensor([1]), torch.tensor([1]), None]
+
+    assert sequence_groups(metadata, sequence_field_index=0, num_examples=4) == ((0,), (1, 2), (3,))
 
 
 def test_loo_bcpd_can_change_prototype_and_final_class_ranking():

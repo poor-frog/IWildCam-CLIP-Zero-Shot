@@ -481,15 +481,16 @@ def _tail_bin_rows(labels, logits_by_name, train_class_counts):
     rows = []
     for name, mask in bins:
         active_classes = int(labels[mask].unique().numel()) if mask.any() else 0
+        guard_eligible = active_classes >= 5
         metrics = {
             method: _macro_f1(labels[mask], logits.argmax(dim=1)[mask], num_classes)
             for method, logits in logits_by_name.items()
         }
-        rows.append((name, int(mask.sum().item()), active_classes, metrics))
+        rows.append((name, int(mask.sum().item()), active_classes, guard_eligible, metrics))
     return rows
 
 
-def write_loo_bcpd_diagnostics(path, split_name, dataset, args, labels, metadata, sequence_field_index, train_class_counts, class_checksum, logits_by_name, selected_result, shuffled, bootstrap_samples, seed):
+def write_loo_bcpd_diagnostics(path, split_name, dataset, args, labels, metadata, sequence_field_index, train_class_counts, class_checksum, logits_by_name, selected_result, shuffled, selected_strength, bootstrap_samples, seed):
     bcpd_predictions = logits_by_name["loo_bcpd"].argmax(dim=1)
     comparison_rows = []
     for method, logits in logits_by_name.items():
@@ -519,6 +520,7 @@ def write_loo_bcpd_diagnostics(path, split_name, dataset, args, labels, metadata
         "## Configuration",
         "",
         f"- Class mapping SHA-256: `{class_checksum}`.",
+        f"- Selected BCPD strength: {selected_strength:g}.",
         f"- Valid bursts: {selected_result.valid_burst_count}; corrected frames: {selected_result.corrected_frame_count}.",
         f"- Burst-shuffle changed-frame fraction: {shuffled.changed_frame_fraction:.4f}; unavailable groups: {shuffled.unavailable_group_count}.",
         "",
@@ -545,15 +547,26 @@ def write_loo_bcpd_diagnostics(path, split_name, dataset, args, labels, metadata
         "",
         "## Tail Bins",
         "",
-        "| Bin | Frames | Supported classes | TPA F1 | BCPD F1 | Delta |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
+        "The promotion guard applies only to bins with at least five supported validation classes; other bins are not reliable for promotion decisions.",
+        "",
+        "| Bin | Frames | Supported classes | Guard | TPA F1 | BCPD F1 | Delta |",
+        "| --- | ---: | ---: | --- | ---: | ---: | ---: |",
     ])
-    for name, frame_count, class_count, metrics in _tail_bin_rows(labels, logits_by_name, train_class_counts):
+    tail_guard_failures = []
+    for name, frame_count, class_count, guard_eligible, metrics in _tail_bin_rows(labels, logits_by_name, train_class_counts):
+        delta = metrics["loo_bcpd"] - metrics["tpa"]
+        guard = "pass" if not guard_eligible or delta >= -0.02 else "fail"
+        if guard == "fail":
+            tail_guard_failures.append(name)
         lines.append(
-            f"| {name} | {frame_count} | {class_count} | {metrics['tpa'] * 100:.2f} | "
-            f"{metrics['loo_bcpd'] * 100:.2f} | {(metrics['loo_bcpd'] - metrics['tpa']) * 100:+.2f} |"
+            f"| {name} | {frame_count} | {class_count} | {guard} | {metrics['tpa'] * 100:.2f} | "
+            f"{metrics['loo_bcpd'] * 100:.2f} | {delta * 100:+.2f} |"
         )
     lines.extend([
+        "",
+        "## Promotion Guard",
+        "",
+        "- Tail-bin guard: " + ("FAIL for " + ", ".join(tail_guard_failures) if tail_guard_failures else "PASS for all reliable bins") + ".",
         "",
         "## Aggregate Mechanism Statistics",
         "",
@@ -804,18 +817,19 @@ def print_selection(rows, best_by_head, limit=16):
     include_tip_columns = any(row["head"] == "tip_adapter" for row in rows)
     print("\n=== Tail Cache Ablation Selection on Validation ===")
     if include_tip_columns:
-        print("| Rank | Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Tip shots | Tip beta | Tip alpha | Score  | Top-1  | F1-macro |")
-        print("| ---- | ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | --------- | -------- | --------- | ------ | ------ | -------- |")
+        print("| Rank | Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Adapter strength | Concept beta | Tip shots | Tip beta | Tip alpha | Score  | Top-1  | F1-macro |")
+        print("| ---- | ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | ---------------- | ------------ | --------- | -------- | --------- | ------ | ------ | -------- |")
     else:
-        print("| Rank | Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
-        print("| ---- | ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
+        print("| Rank | Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Adapter strength | Concept beta | Score  | Top-1  | F1-macro |")
+        print("| ---- | ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | ---------------- | ------------ | ------ | ------ | -------- |")
     for rank, row in enumerate(ranked, start=1):
         top1 = f"{row['top1'] * 100:.2f}%"
         f1 = "N/A" if row["F1-macro_all"] is None else f"{row['F1-macro_all'] * 100:.2f}%"
         concept_beta = "N/A" if row["concept_beta"] is None else f"{row['concept_beta']:g}"
+        adapter_strength = row.get("loo_bcpd_strength", 0.0) if row["head"] == "loo_bcpd" else row["gate_strength"]
         common = (
             f"| {rank:<4} | {row['head']:<17} | {row['prototype_scale']:<5g} | {row['prototype_k']:<1d} | "
-            f"{row['sequence_eta']:<7g} | {row['sctr_strength']:<10g} | {row['sctr_tail_protection']:<12g} | {row['tau']:<4g} | {row['tail_gamma']:<10g} | {row['gate_mode']:<8} | {row['gate_strength']:<8g} | "
+            f"{row['sequence_eta']:<7g} | {row['sctr_strength']:<10g} | {row['sctr_tail_protection']:<12g} | {row['tau']:<4g} | {row['tail_gamma']:<10g} | {row['gate_mode']:<8} | {adapter_strength:<16g} | "
             f"{concept_beta:<12}"
         )
         if include_tip_columns:
@@ -828,11 +842,11 @@ def print_selection(rows, best_by_head, limit=16):
 
     print("\n=== Best by Ablation Head ===")
     if include_tip_columns:
-        print("| Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Tip shots | Tip beta | Tip alpha | Score  | Top-1  | F1-macro |")
-        print("| ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | --------- | -------- | --------- | ------ | ------ | -------- |")
+        print("| Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Adapter strength | Concept beta | Tip shots | Tip beta | Tip alpha | Score  | Top-1  | F1-macro |")
+        print("| ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | ---------------- | ------------ | --------- | -------- | --------- | ------ | ------ | -------- |")
     else:
-        print("| Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Strength | Concept beta | Score  | Top-1  | F1-macro |")
-        print("| ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | -------- | ------------ | ------ | ------ | -------- |")
+        print("| Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Adapter strength | Concept beta | Score  | Top-1  | F1-macro |")
+        print("| ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | ---------------- | ------------ | ------ | ------ | -------- |")
     for head in ("default", "tip_adapter", "prototype", "prototype_tau", "loo_bcpd", "sctr", "concept", "concept_prototype"):
         row = best_by_head.get(head)
         if row is None:
@@ -840,9 +854,10 @@ def print_selection(rows, best_by_head, limit=16):
         top1 = f"{row['top1'] * 100:.2f}%"
         f1 = "N/A" if row["F1-macro_all"] is None else f"{row['F1-macro_all'] * 100:.2f}%"
         concept_beta = "N/A" if row["concept_beta"] is None else f"{row['concept_beta']:g}"
+        adapter_strength = row.get("loo_bcpd_strength", 0.0) if row["head"] == "loo_bcpd" else row["gate_strength"]
         common = (
             f"| {head:<17} | {row['prototype_scale']:<5g} | {row['prototype_k']:<1d} | "
-            f"{row['sequence_eta']:<7g} | {row['sctr_strength']:<10g} | {row['sctr_tail_protection']:<12g} | {row['tau']:<4g} | {row['tail_gamma']:<10g} | {row['gate_mode']:<8} | {row['gate_strength']:<8g} | "
+            f"{row['sequence_eta']:<7g} | {row['sctr_strength']:<10g} | {row['sctr_tail_protection']:<12g} | {row['tau']:<4g} | {row['tail_gamma']:<10g} | {row['gate_mode']:<8} | {adapter_strength:<16g} | "
             f"{concept_beta:<12}"
         )
         if include_tip_columns:
@@ -1224,6 +1239,7 @@ def main(args):
                 diagnostics_logits,
                 selected_result,
                 shuffled,
+                selected_strength,
                 2000,
                 args.seed,
             )
@@ -1314,6 +1330,7 @@ def main(args):
                     "tail_cache/best_tau": best["tau"],
                     f"tail_cache/{head_name}/tail_gamma": best["tail_gamma"],
                     f"tail_cache/{head_name}/gate_strength": best["gate_strength"],
+                    f"tail_cache/{head_name}/loo_bcpd_strength": best.get("loo_bcpd_strength", 0.0),
                     f"tail_cache/{head_name}/sctr_strength": best["sctr_strength"],
                     f"tail_cache/{head_name}/sctr_tail_protection": best["sctr_tail_protection"],
                     f"tail_cache/{head_name}/concept_beta": best["concept_beta"],

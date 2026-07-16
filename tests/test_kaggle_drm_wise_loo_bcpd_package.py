@@ -18,5 +18,6 @@ def test_loo_bcpd_kernel_locks_pilot_configuration_and_exposes_private_key_overr
 
     assert '"DRM_WISE_EVAL_ALPHA": "0.2"' in source
     assert '"DRM_LOO_BCPD_STRENGTH_GRID": "0,0.25,0.5,1"' in source
+    assert '"DRM_STMP_SEQUENCE_CONSENSUS_GRID": "0,0.5"' in source
     assert 'HARDCODED_WANDB_API_KEY = ""' in source
     assert 'environment["WANDB_API_KEY"] = HARDCODED_WANDB_API_KEY' in source

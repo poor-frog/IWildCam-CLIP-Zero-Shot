@@ -57,6 +57,34 @@ def test_loo_bcpd_head_uses_precomputed_logits_without_sequence_postprocessing()
     assert torch.equal(actual, expected)
 
 
+def test_selection_output_displays_loo_bcpd_strength(capsys):
+    from src.eval_tail_cache import print_selection
+
+    row = {
+        "head": "loo_bcpd",
+        "prototype_scale": 50.0,
+        "tau": 0.0,
+        "tail_gamma": 0.0,
+        "prototype_k": 1,
+        "sequence_eta": 0.0,
+        "gate_mode": "none",
+        "gate_strength": 0.0,
+        "sctr_strength": 0.0,
+        "sctr_tail_protection": 0.0,
+        "concept_beta": None,
+        "loo_bcpd_strength": 0.5,
+        "score": 0.4,
+        "top1": 0.5,
+        "F1-macro_all": 0.4,
+    }
+
+    print_selection([row], {"loo_bcpd": row})
+
+    output = capsys.readouterr().out
+    assert "Adapter strength" in output
+    assert "| 0.5" in output
+
+
 def test_class_mapping_checksum_rejects_classifier_with_wrong_class_count():
     from src.eval_tail_cache import class_mapping_checksum
 
@@ -105,6 +133,7 @@ def test_loo_bcpd_diagnostics_writes_controls_and_bootstrap_report(tmp_path):
         logits_by_name={"frame": tpa, "tpa": tpa, "loo_bcpd": bcpd, "class_derangement": tpa},
         selected_result=result,
         shuffled=ShuffledGroups(groups=((0, 1), (2, 3)), changed_frame_fraction=0.5, unavailable_group_count=0),
+        selected_strength=0.5,
         bootstrap_samples=20,
         seed=1,
     )
@@ -113,3 +142,5 @@ def test_loo_bcpd_diagnostics_writes_controls_and_bootstrap_report(tmp_path):
     assert "Paired Sequence Bootstrap" in report
     assert "class_derangement" in report
     assert "checksum" in report
+    assert "Selected BCPD strength: 0.5" in report
+    assert "not reliable" in report

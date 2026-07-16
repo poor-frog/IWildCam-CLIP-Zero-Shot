@@ -198,6 +198,7 @@ def _scores_from_support(
         case "tangent":
             query_delta = (query_support_dot - base_scores * prototype_support_dot) / denominator
             delta_norm_sq = (support_norm_sq - prototype_support_dot.square()).clamp_min(0.0) / denominator.square()
+            normalizer_sq = 1.0 + strength * strength * delta_norm_sq
         case "unconstrained":
             query_delta = (query_support_dot - support.weights * base_scores) / denominator
             delta_norm_sq = (
@@ -205,9 +206,14 @@ def _scores_from_support(
                 - 2.0 * support.weights * prototype_support_dot
                 + support.weights.square()
             ).clamp_min(0.0) / denominator.square()
+            prototype_delta_dot = (prototype_support_dot - support.weights) / denominator
+            normalizer_sq = 1.0 + 2.0 * strength * prototype_delta_dot + strength * strength * delta_norm_sq
         case unreachable:
             raise LooBcpdConfigurationError(f"Unsupported LOO-BCPD variant: {unreachable!r}")
-    normalizer = torch.sqrt(1.0 + strength * strength * delta_norm_sq)
+    _require_finite("LOO-BCPD prototype normalizer", normalizer_sq)
+    if torch.any(normalizer_sq <= 0.0):
+        raise LooBcpdConfigurationError("LOO-BCPD displaced prototypes must have positive squared norms.")
+    normalizer = torch.sqrt(normalizer_sq)
     scores = (base_scores + strength * query_delta) / normalizer
     return scores, query_delta, delta_norm_sq, normalizer
 
