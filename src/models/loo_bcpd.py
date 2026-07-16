@@ -69,6 +69,8 @@ def _metadata_key(metadata_row: torch.Tensor | Sequence[int] | int | float | str
         return stripped or None
     if isinstance(value, float) and math.isnan(value):
         return None
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
     return str(value)
 
 

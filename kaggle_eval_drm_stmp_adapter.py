@@ -38,6 +38,8 @@ LOO_BCPD_STRENGTH_GRID = os.environ.get("DRM_LOO_BCPD_STRENGTH_GRID", "0")
 LOO_BCPD_DIAGNOSTICS_REPORT = os.environ.get("DRM_LOO_BCPD_DIAGNOSTICS_REPORT", "")
 LOO_BCPD_DIAGNOSTICS_SPLIT = os.environ.get("DRM_LOO_BCPD_DIAGNOSTICS_SPLIT", "IWildCamVal")
 SUMMARY_HEAD = os.environ.get("DRM_SUMMARY_HEAD", "")
+STP_MECHANISM_AUDIT_OUTPUT_DIR = os.environ.get("DRM_STP_MECHANISM_AUDIT_OUTPUT_DIR", "")
+STP_MECHANISM_AUDIT_BOOTSTRAP_SAMPLES = os.environ.get("DRM_STP_MECHANISM_AUDIT_BOOTSTRAP_SAMPLES", "2000")
 WANDB_RUN_NAME = os.environ.get(
     "DRM_SCTR_WANDB_RUN_NAME",
     "drm-sctr-v1-route0p25-0p5-1-tail0-0p5-1-2-vitb16-iwildcamval",
@@ -127,6 +129,15 @@ def assert_repo_supports_loo_bcpd_eval(repo_root):
     if not method_path.is_file() or "--loo-bcpd-strength-grid" not in evaluator_path.read_text(encoding="utf-8"):
         raise DrmConceptEvalSupportError(
             "The cloned repo lacks LOO-BCPD evaluation support. Push the latest code before rerunning."
+        )
+
+
+def assert_repo_supports_stp_mechanism_audit(repo_root):
+    evaluator_path = Path(repo_root) / "src" / "eval_tail_cache.py"
+    report_path = Path(repo_root) / "src" / "models" / "stp_audit_report.py"
+    if not report_path.is_file() or "--stp-mechanism-audit-output-dir" not in evaluator_path.read_text(encoding="utf-8"):
+        raise DrmConceptEvalSupportError(
+            "The cloned repo lacks STP Mechanism Audit v1.5 support. Push the latest code before rerunning."
         )
 
 
@@ -255,6 +266,10 @@ def main():
         assert_repo_supports_drm_wise_stp_eval(repo_root)
     if any(float(value.strip()) > 0.0 for value in LOO_BCPD_STRENGTH_GRID.split(",") if value.strip()):
         assert_repo_supports_loo_bcpd_eval(repo_root)
+    if STP_MECHANISM_AUDIT_OUTPUT_DIR:
+        if WISE_ALPHA_GRID or not WISE_EVAL_ALPHA:
+            raise DrmConceptEvalSupportError("STP Mechanism Audit requires a fixed DRM_WISE_EVAL_ALPHA and no WISE selection grid.")
+        assert_repo_supports_stp_mechanism_audit(repo_root)
 
     data_location = prepare_iwildcam_layout(repo_root)
     drm_checkpoint = find_drm_checkpoint()
@@ -269,7 +284,7 @@ def main():
         "--model=ViT-B/16",
         "--train-dataset=IWildCam",
         "--val-dataset=IWildCamVal",
-        "--eval-datasets=IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
+        "--eval-datasets=IWildCamVal" if STP_MECHANISM_AUDIT_OUTPUT_DIR else "--eval-datasets=IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
         "--template=iwildcam_drm_template",
         f"--data-location={data_location}",
         f"--load={converted_checkpoint}",
@@ -298,6 +313,11 @@ def main():
         command.extend([
             f"--loo-bcpd-diagnostics-report={LOO_BCPD_DIAGNOSTICS_REPORT}",
             f"--loo-bcpd-diagnostics-split={LOO_BCPD_DIAGNOSTICS_SPLIT}",
+        ])
+    if STP_MECHANISM_AUDIT_OUTPUT_DIR:
+        command.extend([
+            f"--stp-mechanism-audit-output-dir={STP_MECHANISM_AUDIT_OUTPUT_DIR}",
+            f"--stp-mechanism-audit-bootstrap-samples={STP_MECHANISM_AUDIT_BOOTSTRAP_SAMPLES}",
         ])
     if SUMMARY_HEAD:
         command.append(f"--summary-head={SUMMARY_HEAD}")
@@ -335,7 +355,7 @@ def main():
             command.append(f"--wandb-run-name={WANDB_RUN_NAME}")
     else:
         command.append("--no-wandb")
-    mode_name = "DRM + WiSE + STP two-phase evaluation" if WISE_ALPHA_GRID else "DRM prototype evaluation"
+    mode_name = "STP Mechanism Audit Phase A" if STP_MECHANISM_AUDIT_OUTPUT_DIR else ("DRM + WiSE + STP two-phase evaluation" if WISE_ALPHA_GRID else "DRM prototype evaluation")
     print(f"Running {mode_name}:")
     print(" ".join(str(part) for part in command))
     run(command, cwd=repo_root)

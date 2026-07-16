@@ -1,0 +1,19 @@
+{
+  "id": "thanhquang71/poorfrogs-stp-mechanism-audit",
+  "title": "PoorFrogs STP Mechanism Audit",
+  "code_file": "kaggle_main.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": [
+    "thanhquang71/iwildcam-v2-0-2020-wilds-dataset",
+    "klinh1912/drm-iwildcam-vitb16-checkpoint"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

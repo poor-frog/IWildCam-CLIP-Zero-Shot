@@ -10,6 +10,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
+from wilds.common.data_loaders import get_eval_loader
+from wilds.datasets.wilds_dataset import WILDSSubset
 
 import src.datasets as datasets
 from src.device import resolve_device_choice
@@ -34,6 +36,9 @@ from src.models.loo_bcpd import (
 )
 from src.models.sctr import apply_tail_protective_sctr
 from src.models.stp_diagnostics import build_stp_diagnostics, paired_sequence_bootstrap
+from src.models.stp_audit_report import build_mechanism_audit_report, write_audit_artifacts
+from src.models.stp_audit_split import AUDIT_SPLIT_SEED, apply_normalized_loo_mean, build_location_audit_split
+from src.models.stp_confirmation import build_source_bundle_checksum, file_sha256, prepare_empty_ledger
 from src.models.tail_prototype import apply_tail_class_weights, tail_class_weights
 from src.models.tip_adapter import tip_adapter_cache_logits
 from src.train_coop import build_eval_dataset, log_wandb_summary
@@ -138,6 +143,8 @@ def parse_arguments():
     parser.add_argument("--stp-diagnostics-report", type=str, default=None)
     parser.add_argument("--stp-diagnostics-split", type=str, default="IWildCamOOD")
     parser.add_argument("--stp-diagnostics-bootstrap-samples", type=int, default=1000)
+    parser.add_argument("--stp-mechanism-audit-output-dir", type=Path, default=None)
+    parser.add_argument("--stp-mechanism-audit-bootstrap-samples", type=int, default=2000)
     parser.add_argument("--cd-path", type=str, default=None, help="Optional DRM concept-description JSON for concept ablations.")
     parser.add_argument("--concept-beta-grid", type=str, default="0,0.25,0.5,0.75,1")
     parser.add_argument("--max-cache-examples-per-class", type=int, default=0)
@@ -285,6 +292,161 @@ def class_mapping_checksum(classnames, classifier):
         )
     encoded = "\n".join(f"{index}:{name}" for index, name in enumerate(classnames)).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def validate_stp_audit_class_mapping(classnames, classifier, prototypes):
+    checksum = class_mapping_checksum(classnames, classifier)
+    if not classnames or str(classnames[0]).strip().lower() != "empty":
+        raise ValueError("STP mechanism audit requires canonical class index 0 to be 'empty'.")
+    if prototypes.shape[0] != len(classnames):
+        raise ValueError("Prototype rows do not match the ordered dataset class mapping.")
+    return checksum
+
+
+def _metadata_rows(metadata_array):
+    return [torch.as_tensor(row) for row in metadata_array]
+
+
+def _stp_audit_source_files():
+    return (
+        "src/eval_tail_cache.py",
+        "src/device.py",
+        "src/datasets/__init__.py",
+        "src/datasets/dataloader.py",
+        "src/datasets/iwildcam.py",
+        "src/datasets/iwildcam_metadata/labels.csv",
+        "src/models/clip_encoder.py",
+        "src/models/coop.py",
+        "src/models/flyp.py",
+        "src/models/stmp_adapter.py",
+        "src/models/loo_bcpd.py",
+        "src/models/tail_prototype.py",
+        "src/models/stp_audit_split.py",
+        "src/models/stp_audit_metrics.py",
+        "src/models/stp_audit_report.py",
+        "src/models/stp_confirmation.py",
+        "src/train_coop.py",
+        "src/train_flyp.py",
+        "src/train_maple_full.py",
+    )
+
+
+def _validate_stp_mechanism_audit_args(args):
+    if args.stp_mechanism_audit_output_dir is None:
+        return
+    if args.val_dataset != "IWildCamVal" or args.eval_datasets != ["IWildCamVal"]:
+        raise ValueError("STP mechanism Phase A requires --val-dataset=IWildCamVal and --eval-datasets=IWildCamVal.")
+    if args.max_eval_batches is not None or args.max_train_batches is not None:
+        raise ValueError("STP mechanism Phase A requires complete train and Val-Audit feature extraction.")
+    if args.stp_mechanism_audit_bootstrap_samples < 1:
+        raise ValueError("--stp-mechanism-audit-bootstrap-samples must be positive.")
+    if args.wise_eval_alpha != 0.2 or parse_float_grid(args.prototype_scale_grid) != [50.0] or parse_int_grid(args.multi_prototype_k_grid) != [1]:
+        raise ValueError("STP mechanism Phase A is locked to DRM + WiSE alpha=0.2 with TPA scale=50 and K=1.")
+    if args.cd_path is not None or parse_float_grid(args.cache_tau_grid) != [0.0] or parse_float_grid(args.tail_gamma_grid) != [0.0] or args.gate_mode_grid != "none" or parse_float_grid(args.gate_strength_grid) != [0.0]:
+        raise ValueError("STP mechanism Phase A disables concept, logit-adjustment, tail-weight, and gate variants.")
+    try:
+        args.stp_mechanism_audit_output_dir.resolve().relative_to(Path.cwd().resolve())
+    except ValueError as error:
+        raise ValueError("STP mechanism audit artifacts must be written inside the repository workspace.") from error
+
+
+def run_stp_mechanism_audit(
+    args,
+    model,
+    encoder,
+    train_data,
+    train_counts,
+    prototypes,
+    present_mask,
+    classification_head,
+    class_checksum,
+    wandb,
+):
+    output_dir = args.stp_mechanism_audit_output_dir.resolve()
+    val_dataset = build_eval_dataset("IWildCamVal", encoder, args, allow_ood_hp_subsample=False)
+    metadata_fields = metadata_fields_from_dataset(val_dataset)
+    sequence_field_index = resolve_metadata_field_index(metadata_fields, args.sequence_id_field, ["seq_id", "sequence_id", "sequence"])
+    location_field_index = resolve_metadata_field_index(metadata_fields, "auto", ["location", "camera", "camera_id", "location_id"])
+    if sequence_field_index is None or location_field_index is None:
+        raise ValueError("STP mechanism audit requires both sequence and location metadata fields.")
+    all_metadata = _metadata_rows(val_dataset.test_dataset.metadata_array)
+    all_labels = torch.as_tensor(val_dataset.test_dataset.y_array).long().view(-1)
+    audit_split = build_location_audit_split(
+        all_metadata,
+        all_labels,
+        train_counts.long(),
+        sequence_field_index=sequence_field_index,
+        location_field_index=location_field_index,
+    )
+    audit_indices = torch.where(audit_split.audit_mask)[0].numpy()
+    if audit_indices.size == 0:
+        raise RuntimeError("Val-Audit has no inferential frames after location safety filtering.")
+    audit_subset = WILDSSubset(val_dataset.test_dataset.dataset, val_dataset.test_dataset.indices[audit_indices], val_dataset.test_dataset.transform)
+    audit_loader = get_eval_loader("standard", audit_subset, num_workers=args.workers, batch_size=args.batch_size)
+    audit_features = extract_features(model, audit_loader, args, "Val-Audit features")
+    audit_locations = tuple(audit_split.location_keys[index] for index in audit_indices.tolist())
+    if any(location is None for location in audit_locations):
+        raise RuntimeError("Val-Audit unexpectedly includes a frame without a valid location.")
+    base_logits = default_logits(audit_features["features"], classification_head)
+    tpa_logits = base_logits + 50.0 * prototype_logits(audit_features["features"], prototypes, present_mask, beta=1.0)
+    stp_mean_logits = apply_sequence_consensus(tpa_logits, audit_features["metadata"], sequence_field_index, eta=0.5)
+    stp_loo_logits = apply_normalized_loo_mean(tpa_logits, audit_features["metadata"], sequence_field_index=sequence_field_index, eta=0.5)
+    report = build_mechanism_audit_report(
+        labels=audit_features["labels"],
+        tpa_logits=tpa_logits,
+        stp_mean_logits=stp_mean_logits,
+        stp_loo_logits=stp_loo_logits,
+        metadata=audit_features["metadata"],
+        location_keys=tuple(str(location) for location in audit_locations),
+        sequence_field_index=sequence_field_index,
+        train_class_counts=train_counts.long(),
+        bootstrap_samples=args.stp_mechanism_audit_bootstrap_samples,
+        seed=args.seed,
+    )
+    location_digests = [hashlib.sha256(f"{AUDIT_SPLIT_SEED}|{location}".encode("utf-8")).hexdigest() for location in audit_split.audit_locations]
+    manifest = {
+        "phase": "val_audit_only",
+        "split_seed": AUDIT_SPLIT_SEED,
+        "audit_location_digests": location_digests,
+        "audit_frame_count": int(audit_indices.size),
+        "sequence_field_index": sequence_field_index,
+        "location_field_index": location_field_index,
+        "location_incomplete_frame_count": int(audit_split.location_incomplete_mask.sum().item()),
+        "confirmation_performance_materialized": False,
+    }
+    class_mapping = {
+        "class_mapping_sha256": class_checksum,
+        "classnames": list(train_data.classnames),
+        "empty_class_index": 0,
+    }
+    viability = audit_split.viability.to_public_dict()
+    write_audit_artifacts(output_dir, manifest, viability, report, class_mapping)
+    ledger_path = output_dir / "confirmation_genesis_ledger.json"
+    prepare_empty_ledger(ledger_path)
+    source_files = _stp_audit_source_files()
+    template = {
+        "confirmation_status": "template_not_valid_for_confirmation",
+        "source_files": list(source_files),
+        "source_bundle_sha256": build_source_bundle_checksum(Path.cwd(), source_files),
+        "audit_manifest_path": str((output_dir / "audit_manifest.json").resolve().relative_to(Path.cwd())),
+        "audit_manifest_sha256": file_sha256(output_dir / "audit_manifest.json"),
+        "class_mapping_path": str((output_dir / "class_mapping.json").resolve().relative_to(Path.cwd())),
+        "class_mapping_sha256": file_sha256(output_dir / "class_mapping.json"),
+        "confirmation_ledger_genesis_sha256": file_sha256(ledger_path),
+        "audit_bin_edges": report["audit_bin_edges"],
+        "method_specification": "FILL_BEFORE_CONFIRMATION",
+    }
+    (output_dir / "frozen_spec_template.json").write_text(json.dumps(template, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if wandb is not None:
+        wandb.log({
+            "stp_audit/val_audit/tpa_macro_f1": report["tpa_to_stp_mean"]["reference_macro_f1"],
+            "stp_audit/val_audit/stp_mean_macro_f1": report["tpa_to_stp_mean"]["candidate_macro_f1"],
+            "stp_audit/val_audit/stp_loo_macro_f1": report["tpa_to_stp_loo"]["candidate_macro_f1"],
+            "stp_audit/val_audit/stp_mean_delta": report["tpa_to_stp_mean"]["location_bootstrap"]["delta"],
+            "stp_audit/val_audit/stp_loo_delta": report["tpa_to_stp_loo"]["location_bootstrap"]["delta"],
+            "stp_audit/viability_pass": viability["viability_pass"],
+        })
+    print(f"STP Mechanism Audit Phase A artifacts written to {output_dir}")
 
 
 def prototype_logits(features, prototypes, present_mask, beta):
@@ -954,6 +1116,7 @@ def main(args):
         raise ValueError("--load must point to a FLYP CLIPEncoder checkpoint.")
     if args.val_dataset == "IWildCamOOD":
         raise ValueError("IWildCamOOD is final-test-only and cannot be used for cache hyperparameter selection.")
+    _validate_stp_mechanism_audit_args(args)
     tip_beta_grid, tip_alpha_grid = parse_tip_adapter_grids(args)
     tip_support_shots_grid = parse_tip_adapter_support_shots_grid(args, tip_beta_grid)
     validate_tip_adapter_protocol(args, tip_beta_grid, tip_support_shots_grid)
@@ -1003,8 +1166,22 @@ def main(args):
     print(f"Built tail cache with {cache_features.shape[0]} examples across {int((counts > 0).sum().item())}/{num_classes} classes.")
 
     classification_head = get_cached_flyp_zeroshot_classifier(args, encoder)
-    class_checksum = class_mapping_checksum(train_data.classnames, classification_head)
+    class_checksum = validate_stp_audit_class_mapping(train_data.classnames, classification_head, prototypes)
     print(f"LOO-BCPD class mapping checksum={class_checksum}")
+    if args.stp_mechanism_audit_output_dir is not None:
+        run_stp_mechanism_audit(
+            args,
+            model,
+            encoder,
+            train_data,
+            counts,
+            prototypes,
+            present_mask,
+            classification_head,
+            class_checksum,
+            wandb,
+        )
+        return
     concept_head = None
     if args.cd_path is not None:
         from src.eval_drm_blend import build_drm_classifiers

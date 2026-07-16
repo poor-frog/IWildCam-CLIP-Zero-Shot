@@ -1,4 +1,5 @@
 from collections import defaultdict
+import math
 
 import torch
 
@@ -133,6 +134,18 @@ def metadata_value(metadata_row, field_index):
     return metadata_row if field_index == 0 else None
 
 
+def metadata_group_key(metadata_row, field_index):
+    value = metadata_value(metadata_row, field_index)
+    if value is None or isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    return str(value)
+
+
 def apply_sequence_consensus(logits, metadata, sequence_field_index, eta):
     eta = float(eta)
     if eta == 0.0 or sequence_field_index is None or not metadata:
@@ -140,10 +153,10 @@ def apply_sequence_consensus(logits, metadata, sequence_field_index, eta):
 
     groups = defaultdict(list)
     for row_index, metadata_row in enumerate(metadata):
-        sequence_value = metadata_value(metadata_row, sequence_field_index)
-        if sequence_value is None:
+        sequence_key = metadata_group_key(metadata_row, sequence_field_index)
+        if sequence_key is None:
             continue
-        groups[str(sequence_value)].append(row_index)
+        groups[sequence_key].append(row_index)
     if not groups:
         return logits
 

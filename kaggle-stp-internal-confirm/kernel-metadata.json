@@ -1,0 +1,16 @@
+{
+  "id": "thanhquang71/poorfrogs-stp-internal-confirm",
+  "title": "PoorFrogs STP Internal Confirm",
+  "code_file": "kaggle_main.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "machine_shape": "Standard",
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}
