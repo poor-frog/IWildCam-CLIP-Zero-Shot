@@ -146,17 +146,21 @@ def metadata_group_key(metadata_row, field_index):
     return str(value)
 
 
+def sequence_groups(metadata, sequence_field_index):
+    groups = defaultdict(list)
+    for row_index, metadata_row in enumerate(metadata):
+        sequence_key = metadata_group_key(metadata_row, sequence_field_index)
+        if sequence_key is not None:
+            groups[sequence_key].append(row_index)
+    return groups
+
+
 def apply_sequence_consensus(logits, metadata, sequence_field_index, eta):
     eta = float(eta)
     if eta == 0.0 or sequence_field_index is None or not metadata:
         return logits
 
-    groups = defaultdict(list)
-    for row_index, metadata_row in enumerate(metadata):
-        sequence_key = metadata_group_key(metadata_row, sequence_field_index)
-        if sequence_key is None:
-            continue
-        groups[sequence_key].append(row_index)
+    groups = sequence_groups(metadata, sequence_field_index)
     if not groups:
         return logits
 
@@ -168,6 +172,43 @@ def apply_sequence_consensus(logits, metadata, sequence_field_index, eta):
         sequence_mean = logits.index_select(0, index_tensor).mean(dim=0, keepdim=True)
         sequence_logits[index_tensor] = sequence_mean
     return (1.0 - eta) * logits + eta * sequence_logits
+
+
+def apply_target_selective_sequence_consensus(
+    logits,
+    metadata,
+    sequence_field_index,
+    eta,
+    margin_threshold,
+    min_sequence_length=3,
+):
+    eta = float(eta)
+    if eta == 0.0 or sequence_field_index is None or not metadata:
+        return logits
+    if min_sequence_length < 2:
+        raise ValueError("min_sequence_length must be at least 2.")
+    if logits.shape[1] < 2:
+        return logits
+
+    groups = sequence_groups(metadata, sequence_field_index)
+    if not groups:
+        return logits
+
+    selective_logits = logits.clone()
+    for indices in groups.values():
+        if len(indices) < min_sequence_length:
+            continue
+        index_tensor = torch.tensor(indices, dtype=torch.long, device=logits.device)
+        group_logits = logits.index_select(0, index_tensor)
+        probabilities = torch.softmax(group_logits.float(), dim=1)
+        top_two = probabilities.topk(k=2, dim=1).values
+        target_mask = top_two[:, 0] - top_two[:, 1] <= float(margin_threshold)
+        if not target_mask.any():
+            continue
+        target_indices = index_tensor[target_mask]
+        sequence_mean = group_logits.mean(dim=0, keepdim=True)
+        selective_logits[target_indices] = (1.0 - eta) * logits.index_select(0, target_indices) + eta * sequence_mean
+    return selective_logits
 
 
 def sample_metadata_rows(subset, limit=3):

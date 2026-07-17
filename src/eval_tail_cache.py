@@ -22,6 +22,7 @@ from src.models.flyp import get_cached_flyp_zeroshot_classifier, wise_interpolat
 from src.models.logit_adjustment import apply_logit_adjustment, get_metric_for_tau_selection
 from src.models.stmp_adapter import (
     apply_sequence_consensus,
+    apply_target_selective_sequence_consensus,
     build_multi_prototypes,
     metadata_fields_from_dataset,
     multi_prototype_logits,
@@ -125,6 +126,10 @@ def parse_arguments():
     parser.add_argument("--gate-mode-grid", type=str, default="none")
     parser.add_argument("--gate-strength-grid", type=str, default="0")
     parser.add_argument("--sequence-consensus-grid", type=str, default="0")
+    parser.add_argument("--stp-selective-target", action="store_true")
+    parser.add_argument("--stp-selective-eta", type=float, default=0.5)
+    parser.add_argument("--stp-selective-margin-threshold", type=float, default=0.9341613054275513)
+    parser.add_argument("--stp-selective-min-burst-length", type=int, default=3)
     parser.add_argument("--sctr-strength-grid", type=str, default="0")
     parser.add_argument("--sctr-tail-protection-grid", type=str, default="1")
     parser.add_argument("--loo-bcpd-strength-grid", type=str, default="0")
@@ -557,6 +562,15 @@ def build_candidate_predictions(base_logits, prototype_raw_logits_by_k, concept_
     gate = confidence_gate(base_logits, gate_mode, gate_strength)
     prototype_combo_logits = base_logits + prototype_scale * gate * weighted_prototype_logits
     prototype_combo_logits = apply_logit_adjustment(prototype_combo_logits, class_priors, tau)
+    if head == "stp_selective_target":
+        return apply_target_selective_sequence_consensus(
+            prototype_combo_logits,
+            metadata,
+            sequence_field_index,
+            eta=float(row["stp_selective_eta"]),
+            margin_threshold=float(row["stp_selective_margin_threshold"]),
+            min_sequence_length=int(row["stp_selective_min_burst_length"]),
+        )
     if head == "sctr":
         return apply_tail_protective_sctr(
             prototype_combo_logits,
@@ -747,7 +761,7 @@ def write_loo_bcpd_diagnostics(path, split_name, dataset, args, labels, metadata
     print(f"Saved LOO-BCPD diagnostics to {report_path}")
 
 
-def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, include_concept, sctr_strength_grid=None, sctr_tail_protection_grid=None, tip_beta_grid=None, tip_alpha_grid=None, tip_support_shots_grid=None, loo_bcpd_strength_grid=None):
+def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, include_concept, sctr_strength_grid=None, sctr_tail_protection_grid=None, tip_beta_grid=None, tip_alpha_grid=None, tip_support_shots_grid=None, loo_bcpd_strength_grid=None, stp_selective_target_config=None):
     sctr_strength_grid = [0.0] if sctr_strength_grid is None else sctr_strength_grid
     sctr_tail_protection_grid = [1.0] if sctr_tail_protection_grid is None else sctr_tail_protection_grid
     rows = [{
@@ -891,12 +905,32 @@ def make_candidate_rows(prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mo
                 "concept_beta": None,
                 "loo_bcpd_strength": float(strength),
         })
+    if stp_selective_target_config is not None:
+        rows.append({
+            "head": "stp_selective_target",
+            "prototype_scale": 50.0,
+            "tau": 0.0,
+            "tail_gamma": 0.0,
+            "prototype_k": 1,
+            "sequence_eta": 0.0,
+            "gate_mode": "none",
+            "gate_strength": 0.0,
+            "sctr_strength": 0.0,
+            "sctr_tail_protection": 0.0,
+            "concept_beta": None,
+            "stp_selective_eta": float(stp_selective_target_config["eta"]),
+            "stp_selective_margin_threshold": float(stp_selective_target_config["margin_threshold"]),
+            "stp_selective_min_burst_length": int(stp_selective_target_config["min_sequence_length"]),
+        })
     for row in rows:
         row.setdefault("loo_bcpd_strength", 0.0)
+        row.setdefault("stp_selective_eta", 0.0)
+        row.setdefault("stp_selective_margin_threshold", 0.0)
+        row.setdefault("stp_selective_min_burst_length", 0)
     return rows
 
 
-def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, concept_raw_logits, labels, metadata, args, prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, class_priors, tail_weights_by_gamma, sctr_strength_grid=None, sctr_tail_protection_grid=None, sequence_field_index=None, tip_beta_grid=None, tip_alpha_grid=None, tip_support_shots_grid=None, tip_cache_logits_by_config=None, loo_bcpd_strength_grid=None, loo_bcpd_logits_by_strength=None, train_class_counts=None):
+def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, concept_raw_logits, labels, metadata, args, prototype_scale_grid, tau_grid, tail_gamma_grid, gate_mode_grid, gate_strength_grid, sequence_eta_grid, prototype_k_grid, concept_beta_grid, class_priors, tail_weights_by_gamma, sctr_strength_grid=None, sctr_tail_protection_grid=None, sequence_field_index=None, tip_beta_grid=None, tip_alpha_grid=None, tip_support_shots_grid=None, tip_cache_logits_by_config=None, loo_bcpd_strength_grid=None, loo_bcpd_logits_by_strength=None, train_class_counts=None, stp_selective_target_config=None):
     rows = []
     best_by_head = {}
     candidate_rows = make_candidate_rows(
@@ -915,6 +949,7 @@ def select_adapter_params(dataset, base_logits, prototype_raw_logits_by_k, conce
         tip_alpha_grid=tip_alpha_grid,
         tip_support_shots_grid=tip_support_shots_grid,
         loo_bcpd_strength_grid=loo_bcpd_strength_grid,
+        stp_selective_target_config=stp_selective_target_config,
     )
     for candidate in candidate_rows:
         results = evaluate_candidate(
@@ -1009,7 +1044,7 @@ def print_selection(rows, best_by_head, limit=16):
     else:
         print("| Head              | Scale | K | Seq eta | SCTR route | Tail protect | Tau  | Tail gamma | Gate     | Adapter strength | Concept beta | Score  | Top-1  | F1-macro |")
         print("| ----------------- | ----- | - | ------- | ---------- | ------------ | ---- | ---------- | -------- | ---------------- | ------------ | ------ | ------ | -------- |")
-    for head in ("default", "tip_adapter", "prototype", "prototype_tau", "loo_bcpd", "sctr", "concept", "concept_prototype"):
+    for head in ("default", "tip_adapter", "prototype", "prototype_tau", "stp_selective_target", "loo_bcpd", "sctr", "concept", "concept_prototype"):
         row = best_by_head.get(head)
         if row is None:
             continue
@@ -1201,6 +1236,19 @@ def main(args):
     loo_bcpd_strength_grid = parse_float_grid(args.loo_bcpd_strength_grid)
     if any(strength < 0.0 or strength > 1.0 for strength in loo_bcpd_strength_grid):
         raise ValueError("--loo-bcpd-strength-grid values must be in [0, 1].")
+    if not 0.0 <= args.stp_selective_eta <= 1.0:
+        raise ValueError("--stp-selective-eta must be in [0, 1].")
+    if not 0.0 <= args.stp_selective_margin_threshold <= 1.0:
+        raise ValueError("--stp-selective-margin-threshold must be in [0, 1].")
+    if args.stp_selective_min_burst_length < 2:
+        raise ValueError("--stp-selective-min-burst-length must be at least 2.")
+    stp_selective_target_config = None
+    if args.stp_selective_target:
+        stp_selective_target_config = {
+            "eta": args.stp_selective_eta,
+            "margin_threshold": args.stp_selective_margin_threshold,
+            "min_sequence_length": args.stp_selective_min_burst_length,
+        }
     tail_weights_by_gamma = {
         float(gamma): tail_class_weights(counts, gamma, max_weight=args.tail_weight_max)
         for gamma in tail_gamma_grid
@@ -1284,6 +1332,7 @@ def main(args):
         loo_bcpd_strength_grid=loo_bcpd_strength_grid,
         loo_bcpd_logits_by_strength=val_loo_bcpd_logits_by_strength,
         train_class_counts=counts,
+        stp_selective_target_config=stp_selective_target_config,
     )
     print_selection(selection_rows, best_by_head)
     if args.selection_output is not None:
@@ -1472,7 +1521,7 @@ def main(args):
                     f"stp_diagnostics/{dataset_name}/frame_wrong_stp_correct": diagnostics.frame_wrong_stp_correct,
                     f"stp_diagnostics/{dataset_name}/frame_correct_stp_wrong": diagnostics.frame_correct_stp_wrong,
                 })
-        for head_name in ("default", "tip_adapter", "prototype", "prototype_tau", "loo_bcpd", "sctr", "concept", "concept_prototype"):
+        for head_name in ("default", "tip_adapter", "prototype", "prototype_tau", "stp_selective_target", "loo_bcpd", "sctr", "concept", "concept_prototype"):
             best = best_by_head.get(head_name)
             if best is None:
                 continue
@@ -1508,6 +1557,9 @@ def main(args):
                     f"tail_cache/{head_name}/tail_gamma": best["tail_gamma"],
                     f"tail_cache/{head_name}/gate_strength": best["gate_strength"],
                     f"tail_cache/{head_name}/loo_bcpd_strength": best.get("loo_bcpd_strength", 0.0),
+                    f"tail_cache/{head_name}/stp_selective_eta": best.get("stp_selective_eta", 0.0),
+                    f"tail_cache/{head_name}/stp_selective_margin_threshold": best.get("stp_selective_margin_threshold", 0.0),
+                    f"tail_cache/{head_name}/stp_selective_min_burst_length": best.get("stp_selective_min_burst_length", 0),
                     f"tail_cache/{head_name}/sctr_strength": best["sctr_strength"],
                     f"tail_cache/{head_name}/sctr_tail_protection": best["sctr_tail_protection"],
                     f"tail_cache/{head_name}/concept_beta": best["concept_beta"],
