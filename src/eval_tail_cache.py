@@ -149,6 +149,7 @@ def parse_arguments():
     parser.add_argument("--stp-diagnostics-split", type=str, default="IWildCamOOD")
     parser.add_argument("--stp-diagnostics-bootstrap-samples", type=int, default=1000)
     parser.add_argument("--stp-mechanism-audit-output-dir", type=Path, default=None)
+    parser.add_argument("--stp-mechanism-audit-foundation", choices=["drm_wise", "flyp"], default="drm_wise")
     parser.add_argument("--stp-mechanism-audit-bootstrap-samples", type=int, default=2000)
     parser.add_argument("--cd-path", type=str, default=None, help="Optional DRM concept-description JSON for concept ablations.")
     parser.add_argument("--concept-beta-grid", type=str, default="0,0.25,0.5,0.75,1")
@@ -345,8 +346,12 @@ def _validate_stp_mechanism_audit_args(args):
         raise ValueError("STP mechanism Phase A requires complete train and Val-Audit feature extraction.")
     if args.stp_mechanism_audit_bootstrap_samples < 1:
         raise ValueError("--stp-mechanism-audit-bootstrap-samples must be positive.")
-    if args.wise_eval_alpha != 0.2 or parse_float_grid(args.prototype_scale_grid) != [50.0] or parse_int_grid(args.multi_prototype_k_grid) != [1]:
-        raise ValueError("STP mechanism Phase A is locked to DRM + WiSE alpha=0.2 with TPA scale=50 and K=1.")
+    if parse_float_grid(args.prototype_scale_grid) != [50.0] or parse_int_grid(args.multi_prototype_k_grid) != [1]:
+        raise ValueError("STP mechanism Phase A is locked to TPA scale=50 and K=1.")
+    if args.stp_mechanism_audit_foundation == "drm_wise" and args.wise_eval_alpha != 0.2:
+        raise ValueError("DRM + WiSE Phase A requires --wise-eval-alpha=0.2.")
+    if args.stp_mechanism_audit_foundation == "flyp" and args.wise_eval_alpha is not None:
+        raise ValueError("Clean FLYP Phase A must not apply WiSE; omit --wise-eval-alpha.")
     if args.cd_path is not None or parse_float_grid(args.cache_tau_grid) != [0.0] or parse_float_grid(args.tail_gamma_grid) != [0.0] or args.gate_mode_grid != "none" or parse_float_grid(args.gate_strength_grid) != [0.0]:
         raise ValueError("STP mechanism Phase A disables concept, logit-adjustment, tail-weight, and gate variants.")
     try:
@@ -411,6 +416,7 @@ def run_stp_mechanism_audit(
     location_digests = [hashlib.sha256(f"{AUDIT_SPLIT_SEED}|{location}".encode("utf-8")).hexdigest() for location in audit_split.audit_locations]
     manifest = {
         "phase": "val_audit_only",
+        "foundation": args.stp_mechanism_audit_foundation,
         "split_seed": AUDIT_SPLIT_SEED,
         "audit_location_digests": location_digests,
         "audit_frame_count": int(audit_indices.size),
@@ -450,6 +456,7 @@ def run_stp_mechanism_audit(
             "stp_audit/val_audit/stp_mean_delta": report["tpa_to_stp_mean"]["location_bootstrap"]["delta"],
             "stp_audit/val_audit/stp_loo_delta": report["tpa_to_stp_loo"]["location_bootstrap"]["delta"],
             "stp_audit/viability_pass": viability["viability_pass"],
+            "stp_audit/foundation": args.stp_mechanism_audit_foundation,
         })
     print(f"STP Mechanism Audit Phase A artifacts written to {output_dir}")
 
