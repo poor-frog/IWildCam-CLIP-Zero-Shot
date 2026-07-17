@@ -31,10 +31,11 @@ def test_selective_stp_command_locks_the_frozen_rule():
 
     assert "--eval-datasets=IWildCamVal" in command
     assert "--prototype-scale-grid=50" in command
-    assert "--sequence-consensus-grid=0" in command
+    assert "--sequence-consensus-grid=0,0.5" in command
     assert "--stp-selective-target" in command
     assert "--stp-selective-eta=0.5" in command
     assert "--stp-selective-margin-threshold=0.9341613054275513" in command
     assert "--stp-selective-min-burst-length=3" in command
+    assert "--selection-output=/kaggle/working/selective_stp_selection.json" in command
     assert "--no-wandb" in command
     assert not any("wise" in item.lower() or "drm" in item.lower() for item in command)

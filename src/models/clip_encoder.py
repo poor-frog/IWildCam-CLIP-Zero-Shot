@@ -1,4 +1,5 @@
 import os
+import io
 import pickle
 from pathlib import Path
 
@@ -19,8 +20,22 @@ def torch_save(obj, filename):
 
 
 def torch_load(filename, map_location='cpu'):
-    state = torch.load(filename, map_location=map_location, weights_only=False)
-    return state
+    try:
+        return torch.load(filename, map_location=map_location, weights_only=False)
+    except (ModuleNotFoundError, RuntimeError, pickle.UnpicklingError) as torch_error:
+        original_load_from_bytes = torch.storage._load_from_bytes
+
+        def load_from_bytes(payload):
+            return torch.load(io.BytesIO(payload), map_location=map_location, weights_only=False)
+
+        torch.storage._load_from_bytes = load_from_bytes
+        try:
+            with open(filename, "rb") as handle:
+                return pickle.load(handle)
+        except Exception:
+            raise torch_error
+        finally:
+            torch.storage._load_from_bytes = original_load_from_bytes
 
 
 class CLIPEncoder(torch.nn.Module):

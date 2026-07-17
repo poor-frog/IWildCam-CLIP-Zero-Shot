@@ -45,12 +45,18 @@ def ensure_dependencies():
 def ensure_repo_supports_selective_stp():
     evaluator = WORKING_REPOSITORY / "src" / "eval_tail_cache.py"
     adapter = WORKING_REPOSITORY / "src" / "models" / "stmp_adapter.py"
-    if not evaluator.exists() or not adapter.exists():
+    legacy_checkpoint_module = WORKING_REPOSITORY / "src" / "models" / "modeling.py"
+    if not evaluator.exists() or not adapter.exists() or not legacy_checkpoint_module.exists():
         raise RuntimeError("The cloned repo is incomplete. Push the selective STP implementation before rerunning this kernel.")
     evaluator_source = evaluator.read_text(encoding="utf-8")
     adapter_source = adapter.read_text(encoding="utf-8")
+    legacy_source = legacy_checkpoint_module.read_text(encoding="utf-8")
+    clip_model_source = (WORKING_REPOSITORY / "clip" / "model.py").read_text(encoding="utf-8")
+    clip_source = (WORKING_REPOSITORY / "clip" / "clip.py").read_text(encoding="utf-8")
     if "--stp-selective-target" not in evaluator_source or "apply_target_selective_sequence_consensus" not in adapter_source:
         raise RuntimeError("The cloned repo is stale and does not contain the frozen selective STP implementation.")
+    if "from .clip_encoder import" not in legacy_source or "VisualTransformer = VisionTransformer" not in clip_model_source or "_convert_to_rgb = _convert_image_to_rgb" not in clip_source:
+        raise RuntimeError("The cloned repo is stale and cannot load the official FLYP pickle checkpoint.")
 
 
 def find_iwildcam_source_root():
@@ -154,7 +160,7 @@ def build_command(data_location, checkpoint, use_wandb):
         "--tail-gamma-grid=0",
         "--gate-mode-grid=none",
         "--gate-strength-grid=0",
-        "--sequence-consensus-grid=0",
+        "--sequence-consensus-grid=0,0.5",
         "--multi-prototype-k-grid=1",
         "--multi-prototype-reduction=max",
         "--loo-bcpd-strength-grid=0",
@@ -168,6 +174,7 @@ def build_command(data_location, checkpoint, use_wandb):
         "--workers=2",
         "--device=auto",
         "--summary-head=stp_selective_target",
+        "--selection-output=/kaggle/working/selective_stp_selection.json",
     ]
     if use_wandb:
         command.extend([

@@ -240,6 +240,9 @@ class VisionTransformer(nn.Module):
         return x
 
 
+VisualTransformer = VisionTransformer
+
+
 class CLIP(nn.Module):
     def __init__(self,
                  embed_dim: int,
