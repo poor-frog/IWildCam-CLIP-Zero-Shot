@@ -9,7 +9,7 @@ from typing import Final, Literal, Sequence
 import torch
 import torch.nn.functional as F
 
-from src.models.stmp_adapter import metadata_value
+from src.models.stmp_adapter import metadata_group_key, metadata_value
 
 
 PRIOR_MASS: Final[float] = 1.0
@@ -61,17 +61,7 @@ def _require_unit_rows(name: str, value: torch.Tensor) -> None:
 
 
 def _metadata_key(metadata_row: torch.Tensor | Sequence[int] | int | float | str | None, field_index: int | None) -> str | None:
-    value = metadata_value(metadata_row, field_index)
-    if value is None:
-        return None
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped or None
-    if isinstance(value, float) and math.isnan(value):
-        return None
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)
+    return metadata_group_key(metadata_row, field_index)
 
 
 def sequence_groups(

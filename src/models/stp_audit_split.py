@@ -8,7 +8,7 @@ from typing import Final, Sequence
 import torch
 
 from src.models.loo_bcpd import sequence_groups
-from src.models.stmp_adapter import metadata_value
+from src.models.stmp_adapter import metadata_group_key, metadata_value
 
 
 AUDIT_SPLIT_SEED: Final[str] = "20260716"
@@ -62,17 +62,7 @@ class LocationAuditSplit:
 
 
 def _metadata_key(metadata_row: torch.Tensor | Sequence[int | float | str] | int | float | str | None, field_index: int | None) -> str | None:
-    value = metadata_value(metadata_row, field_index)
-    if value is None:
-        return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped or None
-    return str(value).strip() or None
+    return metadata_group_key(metadata_row, field_index)
 
 
 def _raw_metadata_identity(metadata_row: torch.Tensor | Sequence[int | float | str] | int | float | str | None, field_index: int | None) -> str | None:

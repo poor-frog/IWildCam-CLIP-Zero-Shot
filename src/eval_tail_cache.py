@@ -42,6 +42,7 @@ from src.models.stp_audit_split import AUDIT_SPLIT_SEED, apply_normalized_loo_me
 from src.models.stp_confirmation import build_source_bundle_checksum, file_sha256, prepare_empty_ledger
 from src.models.tail_prototype import apply_tail_class_weights, tail_class_weights
 from src.models.tip_adapter import tip_adapter_cache_logits
+from src.models.vfep_pilot import build_vfep_pilot_report
 from src.train_coop import build_eval_dataset, log_wandb_summary
 from src.train_flyp import clone_state_dict, ensure_open_clip_for_flyp
 from src.train_maple_full import init_wandb
@@ -151,6 +152,13 @@ def parse_arguments():
     parser.add_argument("--stp-mechanism-audit-output-dir", type=Path, default=None)
     parser.add_argument("--stp-mechanism-audit-foundation", choices=["drm_wise", "flyp"], default="drm_wise")
     parser.add_argument("--stp-mechanism-audit-bootstrap-samples", type=int, default=2000)
+    parser.add_argument("--vfep-pilot-output-dir", type=Path, default=None)
+    parser.add_argument("--vfep-strength-grid", type=str, default="0,0.25,0.5,1")
+    parser.add_argument("--vfep-stp-strength-grid", type=str, default="0,0.25,0.5,1")
+    parser.add_argument("--vfep-bootstrap-samples", type=int, default=2000)
+    parser.add_argument("--vfep-bootstrap-seed", type=int, default=20260718)
+    parser.add_argument("--vfep-shuffle-seed-start", type=int, default=20260718)
+    parser.add_argument("--vfep-shuffle-count", type=int, default=20)
     parser.add_argument("--cd-path", type=str, default=None, help="Optional DRM concept-description JSON for concept ablations.")
     parser.add_argument("--concept-beta-grid", type=str, default="0,0.25,0.5,0.75,1")
     parser.add_argument("--max-cache-examples-per-class", type=int, default=0)
@@ -315,6 +323,8 @@ def _metadata_rows(metadata_array):
 
 def _stp_audit_source_files():
     return (
+        "experiments/vfep_v0/preregistration.json",
+        "src/__init__.py",
         "src/eval_tail_cache.py",
         "src/device.py",
         "src/datasets/__init__.py",
@@ -322,6 +332,7 @@ def _stp_audit_source_files():
         "src/datasets/iwildcam.py",
         "src/datasets/iwildcam_metadata/labels.csv",
         "src/models/clip_encoder.py",
+        "src/models/__init__.py",
         "src/models/coop.py",
         "src/models/flyp.py",
         "src/models/stmp_adapter.py",
@@ -331,6 +342,8 @@ def _stp_audit_source_files():
         "src/models/stp_audit_metrics.py",
         "src/models/stp_audit_report.py",
         "src/models/stp_confirmation.py",
+        "src/models/vfep.py",
+        "src/models/vfep_pilot.py",
         "src/train_coop.py",
         "src/train_flyp.py",
         "src/train_maple_full.py",
@@ -338,24 +351,38 @@ def _stp_audit_source_files():
 
 
 def _validate_stp_mechanism_audit_args(args):
-    if args.stp_mechanism_audit_output_dir is None:
+    vfep_output_dir = getattr(args, "vfep_pilot_output_dir", None)
+    if args.stp_mechanism_audit_output_dir is None and vfep_output_dir is None:
         return
+    if args.stp_mechanism_audit_output_dir is not None and vfep_output_dir is not None:
+        raise ValueError("STP mechanism audit and VFEP pilot modes are mutually exclusive.")
     if args.val_dataset != "IWildCamVal" or args.eval_datasets != ["IWildCamVal"]:
         raise ValueError("STP mechanism Phase A requires --val-dataset=IWildCamVal and --eval-datasets=IWildCamVal.")
     if args.max_eval_batches is not None or args.max_train_batches is not None:
         raise ValueError("STP mechanism Phase A requires complete train and Val-Audit feature extraction.")
     if args.stp_mechanism_audit_bootstrap_samples < 1:
         raise ValueError("--stp-mechanism-audit-bootstrap-samples must be positive.")
+    if vfep_output_dir is not None:
+        if args.vfep_bootstrap_samples < 1 or args.vfep_shuffle_count < 1:
+            raise ValueError("VFEP bootstrap and shuffle counts must be positive.")
+        vfep_strengths = parse_float_grid(args.vfep_strength_grid)
+        stp_strengths = parse_float_grid(args.vfep_stp_strength_grid)
+        if any(value < 0.0 or value > 1.0 for value in (*vfep_strengths, *stp_strengths)):
+            raise ValueError("VFEP and STP strength grids must be in [0, 1].")
+        if vfep_strengths != [0.0, 0.25, 0.5, 1.0] or stp_strengths != [0.0, 0.25, 0.5, 1.0]:
+            raise ValueError("VFEP v0 preregistration locks both strength grids to 0,0.25,0.5,1.")
     if parse_float_grid(args.prototype_scale_grid) != [50.0] or parse_int_grid(args.multi_prototype_k_grid) != [1]:
         raise ValueError("STP mechanism Phase A is locked to TPA scale=50 and K=1.")
-    if args.stp_mechanism_audit_foundation == "drm_wise" and args.wise_eval_alpha != 0.2:
+    foundation = "flyp" if vfep_output_dir is not None else args.stp_mechanism_audit_foundation
+    if foundation == "drm_wise" and args.wise_eval_alpha != 0.2:
         raise ValueError("DRM + WiSE Phase A requires --wise-eval-alpha=0.2.")
-    if args.stp_mechanism_audit_foundation == "flyp" and args.wise_eval_alpha is not None:
+    if foundation == "flyp" and args.wise_eval_alpha is not None:
         raise ValueError("Clean FLYP Phase A must not apply WiSE; omit --wise-eval-alpha.")
     if args.cd_path is not None or parse_float_grid(args.cache_tau_grid) != [0.0] or parse_float_grid(args.tail_gamma_grid) != [0.0] or args.gate_mode_grid != "none" or parse_float_grid(args.gate_strength_grid) != [0.0]:
         raise ValueError("STP mechanism Phase A disables concept, logit-adjustment, tail-weight, and gate variants.")
     try:
-        args.stp_mechanism_audit_output_dir.resolve().relative_to(Path.cwd().resolve())
+        output_dir = vfep_output_dir or args.stp_mechanism_audit_output_dir
+        output_dir.resolve().relative_to(Path.cwd().resolve())
     except ValueError as error:
         raise ValueError("STP mechanism audit artifacts must be written inside the repository workspace.") from error
 
@@ -459,6 +486,145 @@ def run_stp_mechanism_audit(
             "stp_audit/foundation": args.stp_mechanism_audit_foundation,
         })
     print(f"STP Mechanism Audit Phase A artifacts written to {output_dir}")
+
+
+def run_vfep_pilot(
+    args,
+    model,
+    encoder,
+    train_data,
+    train_counts,
+    prototypes,
+    present_mask,
+    classification_head,
+    class_checksum,
+    wandb,
+):
+    output_dir = args.vfep_pilot_output_dir.resolve()
+    val_dataset = build_eval_dataset("IWildCamVal", encoder, args, allow_ood_hp_subsample=False)
+    metadata_fields = metadata_fields_from_dataset(val_dataset)
+    sequence_field_index = resolve_metadata_field_index(metadata_fields, args.sequence_id_field, ["seq_id", "sequence_id", "sequence"])
+    location_field_index = resolve_metadata_field_index(metadata_fields, "auto", ["location", "camera", "camera_id", "location_id"])
+    if sequence_field_index is None or location_field_index is None:
+        raise ValueError("VFEP pilot requires sequence and location metadata.")
+    all_metadata = _metadata_rows(val_dataset.test_dataset.metadata_array)
+    all_labels = torch.as_tensor(val_dataset.test_dataset.y_array).long().view(-1)
+    audit_split = build_location_audit_split(
+        all_metadata,
+        all_labels,
+        train_counts.long(),
+        sequence_field_index=sequence_field_index,
+        location_field_index=location_field_index,
+    )
+    audit_indices = torch.where(audit_split.audit_mask)[0].numpy()
+    if audit_indices.size == 0:
+        raise RuntimeError("VFEP Val-Audit has no inferential frames.")
+    audit_subset = WILDSSubset(
+        val_dataset.test_dataset.dataset,
+        val_dataset.test_dataset.indices[audit_indices],
+        val_dataset.test_dataset.transform,
+    )
+    audit_loader = get_eval_loader("standard", audit_subset, num_workers=args.workers, batch_size=args.batch_size)
+    audit_features = extract_features(model, audit_loader, args, "VFEP Val-Audit features")
+    audit_locations = tuple(audit_split.location_keys[index] for index in audit_indices.tolist())
+    if any(location is None for location in audit_locations):
+        raise RuntimeError("VFEP Val-Audit unexpectedly contains a missing location.")
+    base_logits = default_logits(audit_features["features"], classification_head)
+    tpa_logits = base_logits + 50.0 * prototype_logits(audit_features["features"], prototypes, present_mask, beta=1.0)
+    shuffle_seeds = tuple(args.vfep_shuffle_seed_start + index for index in range(args.vfep_shuffle_count))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "phase": "vfep_v0_val_audit_exploratory",
+        "foundation": "clean_flyp_vitb16",
+        "split_seed": AUDIT_SPLIT_SEED,
+        "audit_location_digests": [
+            hashlib.sha256(f"{AUDIT_SPLIT_SEED}|{location}".encode("utf-8")).hexdigest()
+            for location in audit_split.audit_locations
+        ],
+        "audit_frame_count": int(audit_indices.size),
+        "sequence_field_index": sequence_field_index,
+        "location_field_index": location_field_index,
+        "confirmation_performance_materialized": False,
+        "confirm_viability": audit_split.viability.to_public_dict(),
+    }
+    class_mapping = {
+        "class_mapping_sha256": class_checksum,
+        "classnames": list(train_data.classnames),
+        "empty_class_index": 0,
+    }
+    source_files = _stp_audit_source_files()
+    preregistration = {
+        "method": "VFEP-v0",
+        "status": "locked_before_val_audit_execution",
+        "vfep_eta_grid": parse_float_grid(args.vfep_strength_grid),
+        "stp_eta_grid": parse_float_grid(args.vfep_stp_strength_grid),
+        "control_eta_policy": "reuse_selected_vfep_eta",
+        "primary_metric": "fixed-supported-class F1-macro_all",
+        "primary_metric_labels": sorted(int(value) for value in audit_features["labels"].unique().tolist()),
+        "tie_tolerance": 0.0001,
+        "tie_break_rule": "smaller_eta",
+        "shuffle_seeds": list(shuffle_seeds),
+        "bootstrap_seed": args.vfep_bootstrap_seed,
+        "bootstrap_samples": args.vfep_bootstrap_samples,
+        "source_files": list(source_files),
+        "source_bundle_sha256": build_source_bundle_checksum(Path.cwd(), source_files),
+        "class_mapping_sha256": class_checksum,
+        "audit_split_manifest_sha256": hashlib.sha256(json.dumps(manifest, sort_keys=True).encode("utf-8")).hexdigest(),
+        "cct20_status": "not_opened",
+    }
+    (output_dir / "vfep_preregistration.json").write_text(json.dumps(preregistration, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (output_dir / "audit_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (output_dir / "class_mapping.json").write_text(json.dumps(class_mapping, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    report, _ = build_vfep_pilot_report(
+        labels=audit_features["labels"],
+        tpa_logits=tpa_logits,
+        metadata=audit_features["metadata"],
+        location_keys=tuple(str(location) for location in audit_locations),
+        sequence_field_index=sequence_field_index,
+        location_field_index=location_field_index,
+        strengths=parse_float_grid(args.vfep_strength_grid),
+        stp_strengths=parse_float_grid(args.vfep_stp_strength_grid),
+        bootstrap_samples=args.vfep_bootstrap_samples,
+        bootstrap_seed=args.vfep_bootstrap_seed,
+        shuffle_seeds=shuffle_seeds,
+    )
+    (output_dir / "vfep_pilot.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    shuffle_gap = report["real_minus_shuffle_median"]
+    shuffle_gap_text = "unavailable" if shuffle_gap is None else f"{shuffle_gap * 100:+.2f} pp"
+    lines = [
+        "# VFEP v0 Val-Audit Pilot",
+        "",
+        "Exploratory Phase A only. Val-Confirm, ID, and OOD were not evaluated.",
+        "",
+        "| Method | Eta | Macro-F1 | Animal Macro-F1 | Top-1 |",
+        "| --- | ---: | ---: | ---: | ---: |",
+        f"| TPA | 0 | {report['tpa']['macro_f1'] * 100:.2f}% | {report['tpa']['animal_macro_f1'] * 100:.2f}% | {report['tpa']['top1'] * 100:.2f}% |",
+        f"| Tuned STP | {report['selected_stp']['strength']:g} | {report['selected_stp']['macro_f1'] * 100:.2f}% | {report['selected_stp']['animal_macro_f1'] * 100:.2f}% | {report['selected_stp']['top1'] * 100:.2f}% |",
+        f"| VFEP | {report['selected_vfep']['strength']:g} | {report['selected_vfep']['macro_f1'] * 100:.2f}% | {report['selected_vfep']['animal_macro_f1'] * 100:.2f}% | {report['selected_vfep']['top1'] * 100:.2f}% |",
+        "",
+        f"VFEP minus tuned STP: {report['real_gain_vs_stp'] * 100:+.2f} pp.",
+        f"Fixed-class location-bootstrap 95% CI: [{report['fixed_class_location_bootstrap']['low'] * 100:+.2f}, {report['fixed_class_location_bootstrap']['high'] * 100:+.2f}] pp.",
+        f"Real-event minus median shuffled gain: {shuffle_gap_text}.",
+        f"Visibility-capped frames: {report['visibility_capped_frame_count']}.",
+        f"Promotion passed: {report['promotion']['passed']}.",
+    ]
+    (output_dir / "vfep_pilot.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if wandb is not None:
+        wandb_payload = {
+            "vfep/val_audit/tpa_macro_f1": report["tpa"]["macro_f1"],
+            "vfep/val_audit/stp_macro_f1": report["selected_stp"]["macro_f1"],
+            "vfep/val_audit/vfep_macro_f1": report["selected_vfep"]["macro_f1"],
+            "vfep/val_audit/vfep_eta": report["selected_vfep"]["strength"],
+            "vfep/val_audit/stp_eta": report["selected_stp"]["strength"],
+            "vfep/val_audit/delta_vs_stp": report["real_gain_vs_stp"],
+            "vfep/val_audit/bootstrap_low": report["fixed_class_location_bootstrap"]["low"],
+            "vfep/val_audit/bootstrap_high": report["fixed_class_location_bootstrap"]["high"],
+            "vfep/val_audit/promotion_passed": report["promotion"]["passed"],
+        }
+        if report["real_minus_shuffle_median"] is not None:
+            wandb_payload["vfep/val_audit/shuffle_gap"] = report["real_minus_shuffle_median"]
+        wandb.log(wandb_payload)
+    print(f"VFEP v0 Val-Audit artifacts written to {output_dir}")
 
 
 def prototype_logits(features, prototypes, present_mask, beta):
@@ -1210,6 +1376,22 @@ def main(args):
     classification_head = get_cached_flyp_zeroshot_classifier(args, encoder)
     class_checksum = validate_stp_audit_class_mapping(train_data.classnames, classification_head, prototypes)
     print(f"LOO-BCPD class mapping checksum={class_checksum}")
+    if args.vfep_pilot_output_dir is not None:
+        run_vfep_pilot(
+            args,
+            model,
+            encoder,
+            train_data,
+            counts,
+            prototypes,
+            present_mask,
+            classification_head,
+            class_checksum,
+            wandb,
+        )
+        if wandb is not None:
+            wandb.finish()
+        return
     if args.stp_mechanism_audit_output_dir is not None:
         run_stp_mechanism_audit(
             args,

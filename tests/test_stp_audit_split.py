@@ -57,6 +57,19 @@ def test_missing_sequence_ids_remain_singletons_inside_location_split():
     assert result.sequence_groups == ((0,), (1,))
 
 
+def test_sentinel_sequence_ids_remain_singletons_inside_location_split():
+    from src.models.stp_audit_split import build_location_audit_split
+
+    metadata = [torch.tensor([1, -1, 8]), torch.tensor([1, -1, 8])]
+    labels = torch.tensor([0, 1])
+    train_counts = torch.tensor([30, 10])
+
+    result = build_location_audit_split(metadata, labels, train_counts, sequence_field_index=1, location_field_index=0)
+
+    assert result.tpa_fallback_mask.tolist() == [True, True]
+    assert result.sequence_groups == ((0,), (1,))
+
+
 def test_normalized_loo_mean_excludes_target_and_reuses_singleton_logits():
     from src.models.stp_audit_split import apply_normalized_loo_mean
 
@@ -81,6 +94,17 @@ def test_stp_mean_keeps_missing_sequence_ids_as_singletons_and_normalizes_numeri
     assert torch.allclose(actual[0], actual[1])
     assert torch.equal(actual[2], logits[2])
     assert torch.equal(actual[3], logits[3])
+
+
+def test_stp_mean_keeps_sentinel_sequence_ids_as_singletons():
+    from src.models.stmp_adapter import apply_sequence_consensus
+
+    logits = torch.tensor([[1.0, 0.0], [0.0, 2.0]])
+    metadata = [torch.tensor([-1]), torch.tensor([-1])]
+
+    actual = apply_sequence_consensus(logits, metadata, sequence_field_index=0, eta=1.0)
+
+    assert torch.equal(actual, logits)
 
 
 def test_target_selective_stp_only_blends_low_margin_targets_in_long_bursts():

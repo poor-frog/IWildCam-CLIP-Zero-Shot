@@ -1,0 +1,111 @@
+{
+  "bootstrap": {
+    "primary": "fixed_class_location_cluster",
+    "samples": 2000,
+    "seed": 20260718,
+    "sensitivity": [
+      "active_class_location_cluster",
+      "equal_location_top1"
+    ]
+  },
+  "cct20": {
+    "backbone": "ViT-B-16",
+    "pretrained": "openai",
+    "prototype_scale": 50.0,
+    "prototype_weighting": "image_weighted",
+    "sequence_balanced_prototype_policy": "sensitivity_only",
+    "stp_eta_policy": "independent_cis_validation_selection",
+    "trans_test_location_gate": {
+      "minimum_nonnegative": 6,
+      "minimum_positive": 4
+    },
+    "trans_test_one_shot": true,
+    "trans_validation_location_count": 1,
+    "trans_validation_policy": "directional_preflight_only"
+  },
+  "claim_boundary": "detector-free, gradient-free event inference with one validation-selected strength",
+  "control_eta_policy": "reuse_selected_vfep_eta",
+  "controls": [
+    "uniform",
+    "self_inclusive",
+    "arithmetic",
+    "all_class",
+    "location_prior",
+    "shuffle"
+  ],
+  "empty_class_index": 0,
+  "foundation": {
+    "checkpoint": "clean_official_flyp_vit_b16",
+    "prototype_count_per_class": 1,
+    "prototype_scale": 50.0,
+    "prototype_weighting": "image_weighted"
+  },
+  "method": "VFEP-v0",
+  "phase_1": {
+    "dataset_split": "IWildCam Val-Audit",
+    "forbidden_splits": [
+      "Val-Confirm",
+      "IWildCamIDVal",
+      "IWildCamID",
+      "IWildCamOOD"
+    ],
+    "promotion": {
+      "animal_macro_f1_non_regression": true,
+      "fixed_location_bootstrap_lower_bound_gt_zero": true,
+      "macro_f1_gain_vs_tuned_stp_pp": 0.3,
+      "net_species_correction_better_than_stp": true,
+      "real_minus_shuffle_median_pp": 0.25
+    }
+  },
+  "primary_metric": "fixed_supported_class_F1_macro_all",
+  "shuffle": {
+    "count": 20,
+    "exclude_unavailable_frames_from_shuffle_comparison": true,
+    "preserve_burst_lengths": true,
+    "preserve_location": true,
+    "prohibit_original_sequence_pairs": true,
+    "seeds": [
+      20260718,
+      20260719,
+      20260720,
+      20260721,
+      20260722,
+      20260723,
+      20260724,
+      20260725,
+      20260726,
+      20260727,
+      20260728,
+      20260729,
+      20260730,
+      20260731,
+      20260732,
+      20260733,
+      20260734,
+      20260735,
+      20260736,
+      20260737
+    ]
+  },
+  "status": "locked_before_phase_1_execution",
+  "stp_eta_grid": [
+    0.0,
+    0.25,
+    0.5,
+    1.0
+  ],
+  "structural_invariants": [
+    "empty_posterior_equal_to_tpa",
+    "total_animal_probability_equal_to_tpa",
+    "empty_prediction_state_equal_to_tpa",
+    "empty_confusion_equal_to_tpa"
+  ],
+  "tie_break_rule": "smaller_eta",
+  "tie_tolerance": 0.0001,
+  "vfep_eta_grid": [
+    0.0,
+    0.25,
+    0.5,
+    1.0
+  ]
+}

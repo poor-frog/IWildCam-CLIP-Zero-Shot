@@ -4,6 +4,9 @@ import math
 import torch
 
 
+INVALID_METADATA_GROUP_KEYS = frozenset({"-1", "nan", "none", "null", "missing"})
+
+
 def normalize_features(features, eps=1e-12):
     return features / features.norm(dim=-1, keepdim=True).clamp_min(eps)
 
@@ -139,11 +142,12 @@ def metadata_group_key(metadata_row, field_index):
     if value is None or isinstance(value, float) and not math.isfinite(value):
         return None
     if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    if isinstance(value, str):
+        value = str(int(value))
+    elif isinstance(value, str):
         value = value.strip()
-        return value or None
-    return str(value)
+    else:
+        value = str(value)
+    return None if not value or value.lower() in INVALID_METADATA_GROUP_KEYS else value
 
 
 def sequence_groups(metadata, sequence_field_index):
