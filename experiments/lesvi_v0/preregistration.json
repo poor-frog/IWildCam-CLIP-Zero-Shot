@@ -1,0 +1,81 @@
+{
+  "bootstrap": {
+    "ci": "two-sided percentile 95%",
+    "samples": 2000,
+    "seed": 20260718,
+    "unit": "location with replacement and preserved multiplicity"
+  },
+  "calibration_diagnostics": {
+    "bins": 15,
+    "role": "limitation wording only",
+    "split": "existing Val-Audit TPA",
+    "tie_break": "stable (confidence, frame_id)"
+  },
+  "claim_boundary": "event-local prior-relative latent correction with soft nonempty visibility and closed-form leave-one-out inference",
+  "conditional_independence_is_locked_limitation": true,
+  "confirmation": {
+    "confirmatory_outputs": [
+      "tpa",
+      "stp_mean_eta_0p5",
+      "lesvi_v0",
+      "no_visibility",
+      "99_donor_event_rotations"
+    ],
+    "diagnostic_only_outputs": [
+      "stp_loo",
+      "vfep_v0",
+      "global_visibility",
+      "self_inclusive",
+      "location_context"
+    ],
+    "diagnostic_vfep_strength": 1.0,
+    "diagnostics_may_not_replace_or_modify_method": true,
+    "durable_replay_registry": "deterministic W&B run ID derived from frozen specification checksum",
+    "latest_ledger_must_be_explicit": true,
+    "split_viability_must_pass": true,
+    "one_shot": true
+  },
+  "fallback": {
+    "invalid_metadata": "bitwise cached TPA",
+    "nonfinite_baseline": "invalidate confirmation",
+    "nonfinite_intermediate": "TPA fallback and receipt counter",
+    "singleton": "bitwise cached TPA"
+  },
+  "method": "LESVI-v0",
+  "method_hyperparameters": {
+    "event_length_normalization": null,
+    "inference_strength": null,
+    "redundancy_correction": null,
+    "temperature": null
+  },
+  "primary_metric": "fixed-supported-class F1-macro_all",
+  "promotion": {
+    "animal_macro_f1_gt_stp": true,
+    "bootstrap_lower_gt_zero": true,
+    "mixed_empty_c2w_lesvi_lt_stp": true,
+    "mixed_empty_noninferiority_vs_tpa_pp": 0.25,
+    "no_visibility_c2w_ge_lesvi": true,
+    "no_visibility_not_better_overall": true,
+    "one_species_no_empty_noninferiority_vs_stp_pp": 0.5,
+    "overall_gain_vs_stp_pp": 0.5,
+    "rotation_common_coverage": 0.95,
+    "rotation_gap_pp": 0.25,
+    "rotation_p_max": 0.05
+  },
+  "rotation": {
+    "count": 99,
+    "seeds": {
+      "end_inclusive": 20260816,
+      "start": 20260718
+    },
+    "support": "common intersection across real and all rotations"
+  },
+  "status": "final_frozen_specification_template",
+  "train_prior": {
+    "animal_species_prior": "uniform conditional on nonempty event",
+    "event_weighting": "pooled frame counts",
+    "fallback": "global Laplace visibility",
+    "laplace_alpha": 1.0,
+    "valid_events": "all-empty or exactly one animal species with one valid location per sequence"
+  }
+}
