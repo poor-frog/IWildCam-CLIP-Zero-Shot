@@ -1,0 +1,29 @@
+{
+  "backbone": "ViT-B-16",
+  "base_classifier": "OpenCLIP openai text logits plus image-weighted normalized train prototype residual at scale 50",
+  "claim_boundary": "external cross-dataset confirmation on CCT-20 unseen locations",
+  "class_mapping": "canonical empty at internal index 0; animal classes sorted by normalized name",
+  "controls": [
+    "TPA",
+    "STP-Mean eta=0.5",
+    "LESVI-v0",
+    "no_visibility",
+    "99 donor-event rotations"
+  ],
+  "method": "LESVI-CCT20-v0",
+  "multi_label_policy": "Exclude any image with more than one unique category_id before feature extraction and metrics; report counts only when that stage is opened.",
+  "prompts": [
+    "a photo of {class}.",
+    "{class} in the wild."
+  ],
+  "prototype_weighting": "image-weighted main; normalized image features before mean and normalized prototype after mean",
+  "stage_policy": {
+    "cis_validation": "engineering smoke and frozen-base verification only",
+    "trans_test": "one-shot external confirmation after positive trans-validation receipt",
+    "trans_validation": "one-location directional preflight; LESVI macro-F1 > STP and animal macro-F1 >= STP"
+  },
+  "stp_eta": 0.5,
+  "trans_test_expected_location_count": 9,
+  "trans_validation_expected_location_count": 1,
+  "validation_selected_strength": null
+}

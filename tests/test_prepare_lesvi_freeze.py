@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import sys
 from types import SimpleNamespace
 
@@ -93,3 +94,22 @@ def test_freeze_rejects_wrong_foundation_or_failed_viability():
 
 def test_source_bundle_includes_runtime_configuration():
     assert "src/config.py" in SOURCE_FILES
+
+
+def test_kaggle_freeze_publishes_blocked_receipt_without_opening_confirmation(tmp_path):
+    module_path = __import__("pathlib").Path("kaggle-flyp-lesvi-freeze/kaggle_main.py")
+    spec = importlib.util.spec_from_file_location("lesvi_freeze_launcher", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.BLOCKED_OUTPUT_DIR = tmp_path / "blocked"
+    audit = tmp_path / "audit.json"
+    viability = tmp_path / "viability.json"
+    audit.write_text('{"phase":"val_audit_only"}', encoding="utf-8")
+    viability.write_text('{"viability_pass":false,"confirm_supported_class_fraction":0.62}', encoding="utf-8")
+
+    assert module.publish_blocked_receipt(audit, viability) is True
+    receipt = json.loads((module.BLOCKED_OUTPUT_DIR / "freeze_blocked_receipt.json").read_text(encoding="utf-8"))
+    assert receipt["status"] == "blocked"
+    assert receipt["confirmation_performance_materialized"] is False
+    assert receipt["frozen_spec_created"] is False

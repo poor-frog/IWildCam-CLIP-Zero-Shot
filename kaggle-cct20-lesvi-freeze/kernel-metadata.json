@@ -1,6 +1,6 @@
 {
-  "id": "klinh1912/poorfrogs-flyp-lesvi-freeze",
-  "title": "PoorFrogs FLYP LESVI Freeze",
+  "id": "klinh1912/poorfrogs-cct20-lesvi-freeze",
+  "title": "PoorFrogs CCT20 LESVI Freeze",
   "code_file": "kaggle_main.py",
   "language": "python",
   "kernel_type": "script",
@@ -9,11 +9,7 @@
   "enable_tpu": false,
   "enable_internet": true,
   "machine_shape": "Standard",
-  "dataset_sources": [
-    "thanhquang71/iwildcam-v2-0-2020-wilds-dataset",
-    "klinh1912/flyp-official-vitb16-checkpoint",
-    "klinh1912/poorfrogs-lesvi-audit-artifacts"
-  ],
+  "dataset_sources": [],
   "competition_sources": [],
   "kernel_sources": [],
   "model_sources": []

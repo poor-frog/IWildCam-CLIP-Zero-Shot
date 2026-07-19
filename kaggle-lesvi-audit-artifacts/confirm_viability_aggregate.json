@@ -1,0 +1,12 @@
+{
+  "audit_frame_count": 10654,
+  "audit_location_count": 20,
+  "audit_supported_class_fraction": 0.7466666666666667,
+  "audit_supported_tail_class_count": 8,
+  "confirm_frame_count": 4307,
+  "confirm_largest_location_frame_fraction": 0.2131413977246343,
+  "confirm_location_count": 12,
+  "confirm_supported_class_fraction": 0.6266666666666667,
+  "confirm_supported_tail_class_count": 4,
+  "viability_pass": false
+}
