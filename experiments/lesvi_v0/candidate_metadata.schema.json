@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "access_policy": {
+      "const": {
+        "confirmation": "aggregate_only",
+        "test_labels": "unopened"
+      }
+    },
+    "annotation_sources": {
+      "additionalProperties": false,
+      "properties": {
+        "confirmation": {"$ref": "#/$defs/source"},
+        "test": {"$ref": "#/$defs/source"},
+        "train": {"$ref": "#/$defs/source"}
+      },
+      "required": ["train", "confirmation", "test"],
+      "type": "object"
+    },
+    "classes": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {"minimum": 0, "type": "integer"},
+          "name": {"minLength": 1, "type": "string"}
+        },
+        "required": ["id", "name"],
+        "type": "object"
+      },
+      "minItems": 2,
+      "type": "array"
+    },
+    "dataset_id": {"minLength": 1, "type": "string"},
+    "empty_class_id": {"const": 0},
+    "schema_version": {"const": 1},
+    "snapshot_id": {"minLength": 1, "type": "string"},
+    "splits": {
+      "additionalProperties": false,
+      "properties": {
+        "confirmation": {"$ref": "#/$defs/labeled_split"},
+        "test": {
+          "additionalProperties": false,
+          "properties": {
+            "location_count": {"minimum": 0, "type": "integer"},
+            "record_count": {"minimum": 0, "type": "integer"}
+          },
+          "required": ["record_count", "location_count"],
+          "type": "object"
+        },
+        "train": {"$ref": "#/$defs/labeled_split"}
+      },
+      "required": ["train", "confirmation", "test"],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "snapshot_id",
+    "empty_class_id",
+    "classes",
+    "annotation_sources",
+    "access_policy",
+    "splits"
+  ],
+  "type": "object",
+  "$defs": {
+    "labeled_split": {
+      "additionalProperties": false,
+      "properties": {
+        "records": {
+          "items": {"$ref": "#/$defs/record"},
+          "type": "array"
+        }
+      },
+      "required": ["records"],
+      "type": "object"
+    },
+    "record": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {"minLength": 1, "type": "string"},
+        "frame_id": {"minLength": 1, "type": "string"},
+        "labels": {
+          "items": {"minimum": 0, "type": "integer"},
+          "type": "array"
+        },
+        "location_id": {"minLength": 1, "type": "string"}
+      },
+      "required": ["frame_id", "event_id", "location_id", "labels"],
+      "type": "object"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+        "uri": {"minLength": 1, "type": "string"}
+      },
+      "required": ["uri", "sha256"],
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "candidates": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+            "type": "string"
+          },
+          "metadata_canonical_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "metadata_path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "snapshot_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "snapshot_id",
+          "metadata_path",
+          "metadata_canonical_sha256"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "gates": {
+      "const": {
+        "max_confirmation_largest_location_frame_fraction": 0.5,
+        "min_confirmation_location_count": 10,
+        "min_confirmation_supported_class_fraction": 0.8,
+        "min_confirmation_supported_tail_class_count": 5,
+        "required_all_empty_train_events": 1,
+        "required_mixed_visibility_species_events": 1,
+        "tail_max_train_frames": 20
+      }
+    },
+    "schema_version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "gates",
+    "candidates"
+  ],
+  "title": "LESVI-v0 candidate registry",
+  "type": "object"
+}
