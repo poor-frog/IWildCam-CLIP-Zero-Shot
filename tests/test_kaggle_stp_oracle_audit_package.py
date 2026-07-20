@@ -27,6 +27,9 @@ def test_oracle_launcher_has_frozen_protocol_and_no_hardcoded_credential():
 def test_generic_launcher_forces_audit_modes_to_run_without_wandb():
     source = (ROOT / "kaggle_eval_drm_stmp_adapter.py").read_text(encoding="utf-8")
 
-    audit_guard = "if STP_MECHANISM_AUDIT_OUTPUT_DIR or STP_ORACLE_AUDIT_OUTPUT_DIR:"
+    audit_guard = (
+        "if STP_MECHANISM_AUDIT_OUTPUT_DIR or STP_ORACLE_AUDIT_OUTPUT_DIR "
+        "or STP_CANDIDATE_RELIABILITY_OUTPUT_DIR:"
+    )
     wandb_block = source[source.index(audit_guard, source.index("if SUMMARY_HEAD:")):]
     assert wandb_block.index('command.append("--no-wandb")') < wandb_block.index("elif configure_wandb():")

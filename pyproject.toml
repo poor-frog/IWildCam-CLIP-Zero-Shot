@@ -16,6 +16,7 @@ dependencies = [
     "open-clip-torch==3.3.0",
     "pandas==2.3.3",
     "regex==2026.5.9",
+    "scikit-learn==1.7.2",
     "torch==2.12.0",
     "torchvision==0.27.0",
     "tqdm==4.67.3",

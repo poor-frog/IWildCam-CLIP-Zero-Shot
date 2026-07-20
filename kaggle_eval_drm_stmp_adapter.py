@@ -45,6 +45,13 @@ STP_ORACLE_AUDIT_BOOTSTRAP_SAMPLES = os.environ.get("DRM_STP_ORACLE_AUDIT_BOOTST
 STP_ORACLE_AUDIT_BOOTSTRAP_SEED = os.environ.get("DRM_STP_ORACLE_AUDIT_BOOTSTRAP_SEED", "20260720")
 STP_ORACLE_AUDIT_SHUFFLE_COUNT = os.environ.get("DRM_STP_ORACLE_AUDIT_SHUFFLE_COUNT", "20")
 STP_ORACLE_AUDIT_SHUFFLE_SEED_START = os.environ.get("DRM_STP_ORACLE_AUDIT_SHUFFLE_SEED_START", "20260720")
+STP_CANDIDATE_RELIABILITY_OUTPUT_DIR = os.environ.get("DRM_STP_CANDIDATE_RELIABILITY_OUTPUT_DIR", "")
+STP_CANDIDATE_RELIABILITY_BOOTSTRAP_SAMPLES = os.environ.get("DRM_STP_CANDIDATE_RELIABILITY_BOOTSTRAP_SAMPLES", "2000")
+STP_CANDIDATE_RELIABILITY_BOOTSTRAP_SEED = os.environ.get("DRM_STP_CANDIDATE_RELIABILITY_BOOTSTRAP_SEED", "20260721")
+STP_CANDIDATE_RELIABILITY_SHUFFLE_COUNT = os.environ.get("DRM_STP_CANDIDATE_RELIABILITY_SHUFFLE_COUNT", "20")
+STP_CANDIDATE_RELIABILITY_SHUFFLE_SEED_START = os.environ.get("DRM_STP_CANDIDATE_RELIABILITY_SHUFFLE_SEED_START", "20260721")
+STP_CANDIDATE_RELIABILITY_PERMUTATION_COUNT = os.environ.get("DRM_STP_CANDIDATE_RELIABILITY_PERMUTATION_COUNT", "20")
+STP_CANDIDATE_RELIABILITY_PERMUTATION_SEED_START = os.environ.get("DRM_STP_CANDIDATE_RELIABILITY_PERMUTATION_SEED_START", "20260741")
 WANDB_RUN_NAME = os.environ.get(
     "DRM_SCTR_WANDB_RUN_NAME",
     "drm-sctr-v1-route0p25-0p5-1-tail0-0p5-1-2-vitb16-iwildcamval",
@@ -73,7 +80,7 @@ def ensure_deps():
         "open-clip-torch",
         "pandas",
         "regex",
-        "scikit-learn",
+        "scikit-learn==1.7.2",
         "tqdm",
         "wandb",
         "webdataset",
@@ -152,6 +159,15 @@ def assert_repo_supports_stp_oracle_audit(repo_root):
     if not report_path.is_file() or "--stp-oracle-audit-output-dir" not in evaluator_path.read_text(encoding="utf-8"):
         raise DrmConceptEvalSupportError(
             "The cloned repo lacks STP Oracle Audit v0 support. Push the latest code before rerunning."
+        )
+
+
+def assert_repo_supports_stp_candidate_reliability(repo_root):
+    evaluator_path = Path(repo_root) / "src" / "eval_tail_cache.py"
+    method_path = Path(repo_root) / "src" / "models" / "stp_candidate_reliability_audit.py"
+    if not method_path.is_file() or "--stp-candidate-reliability-output-dir" not in evaluator_path.read_text(encoding="utf-8"):
+        raise DrmConceptEvalSupportError(
+            "The cloned repo lacks STP Candidate Reliability Audit v0 support. Push the latest code before rerunning."
         )
 
 
@@ -280,13 +296,15 @@ def main():
         assert_repo_supports_drm_wise_stp_eval(repo_root)
     if any(float(value.strip()) > 0.0 for value in LOO_BCPD_STRENGTH_GRID.split(",") if value.strip()):
         assert_repo_supports_loo_bcpd_eval(repo_root)
-    if STP_MECHANISM_AUDIT_OUTPUT_DIR or STP_ORACLE_AUDIT_OUTPUT_DIR:
+    if STP_MECHANISM_AUDIT_OUTPUT_DIR or STP_ORACLE_AUDIT_OUTPUT_DIR or STP_CANDIDATE_RELIABILITY_OUTPUT_DIR:
         if WISE_ALPHA_GRID or not WISE_EVAL_ALPHA:
             raise DrmConceptEvalSupportError("STP audit modes require a fixed DRM_WISE_EVAL_ALPHA and no WISE selection grid.")
         if STP_MECHANISM_AUDIT_OUTPUT_DIR:
             assert_repo_supports_stp_mechanism_audit(repo_root)
         if STP_ORACLE_AUDIT_OUTPUT_DIR:
             assert_repo_supports_stp_oracle_audit(repo_root)
+        if STP_CANDIDATE_RELIABILITY_OUTPUT_DIR:
+            assert_repo_supports_stp_candidate_reliability(repo_root)
 
     data_location = prepare_iwildcam_layout(repo_root)
     drm_checkpoint = find_drm_checkpoint()
@@ -301,7 +319,7 @@ def main():
         "--model=ViT-B/16",
         "--train-dataset=IWildCam",
         "--val-dataset=IWildCamVal",
-        "--eval-datasets=IWildCamVal" if (STP_MECHANISM_AUDIT_OUTPUT_DIR or STP_ORACLE_AUDIT_OUTPUT_DIR) else "--eval-datasets=IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
+        "--eval-datasets=IWildCamVal" if (STP_MECHANISM_AUDIT_OUTPUT_DIR or STP_ORACLE_AUDIT_OUTPUT_DIR or STP_CANDIDATE_RELIABILITY_OUTPUT_DIR) else "--eval-datasets=IWildCamIDVal,IWildCamVal,IWildCamID,IWildCamOOD",
         "--template=iwildcam_drm_template",
         f"--data-location={data_location}",
         f"--load={converted_checkpoint}",
@@ -344,6 +362,16 @@ def main():
             f"--stp-oracle-audit-shuffle-count={STP_ORACLE_AUDIT_SHUFFLE_COUNT}",
             f"--stp-oracle-audit-shuffle-seed-start={STP_ORACLE_AUDIT_SHUFFLE_SEED_START}",
         ])
+    if STP_CANDIDATE_RELIABILITY_OUTPUT_DIR:
+        command.extend([
+            f"--stp-candidate-reliability-output-dir={STP_CANDIDATE_RELIABILITY_OUTPUT_DIR}",
+            f"--stp-candidate-reliability-bootstrap-samples={STP_CANDIDATE_RELIABILITY_BOOTSTRAP_SAMPLES}",
+            f"--stp-candidate-reliability-bootstrap-seed={STP_CANDIDATE_RELIABILITY_BOOTSTRAP_SEED}",
+            f"--stp-candidate-reliability-shuffle-count={STP_CANDIDATE_RELIABILITY_SHUFFLE_COUNT}",
+            f"--stp-candidate-reliability-shuffle-seed-start={STP_CANDIDATE_RELIABILITY_SHUFFLE_SEED_START}",
+            f"--stp-candidate-reliability-permutation-count={STP_CANDIDATE_RELIABILITY_PERMUTATION_COUNT}",
+            f"--stp-candidate-reliability-permutation-seed-start={STP_CANDIDATE_RELIABILITY_PERMUTATION_SEED_START}",
+        ])
     if SUMMARY_HEAD:
         command.append(f"--summary-head={SUMMARY_HEAD}")
     if WISE_ALPHA_GRID:
@@ -374,7 +402,7 @@ def main():
             f"--wandb-run-prefix={WISE_WANDB_RUN_PREFIX}",
             "--audit-metadata",
         ]
-    if STP_MECHANISM_AUDIT_OUTPUT_DIR or STP_ORACLE_AUDIT_OUTPUT_DIR:
+    if STP_MECHANISM_AUDIT_OUTPUT_DIR or STP_ORACLE_AUDIT_OUTPUT_DIR or STP_CANDIDATE_RELIABILITY_OUTPUT_DIR:
         command.append("--no-wandb")
     elif configure_wandb():
         command.extend(["--wandb", "--wandb-project=PoorFrogs"])
@@ -382,7 +410,14 @@ def main():
             command.append(f"--wandb-run-name={WANDB_RUN_NAME}")
     else:
         command.append("--no-wandb")
-    mode_name = "STP Mechanism Audit Phase A" if STP_MECHANISM_AUDIT_OUTPUT_DIR else ("DRM + WiSE + STP two-phase evaluation" if WISE_ALPHA_GRID else "DRM prototype evaluation")
+    if STP_CANDIDATE_RELIABILITY_OUTPUT_DIR:
+        mode_name = "STP Candidate Reliability Audit v0"
+    elif STP_ORACLE_AUDIT_OUTPUT_DIR:
+        mode_name = "STP Oracle Audit v0"
+    elif STP_MECHANISM_AUDIT_OUTPUT_DIR:
+        mode_name = "STP Mechanism Audit Phase A"
+    else:
+        mode_name = "DRM + WiSE + STP two-phase evaluation" if WISE_ALPHA_GRID else "DRM prototype evaluation"
     print(f"Running {mode_name}:")
     print(" ".join(str(part) for part in command))
     run(command, cwd=repo_root)

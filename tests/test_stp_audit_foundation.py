@@ -18,6 +18,13 @@ def audit_args(**overrides):
         "stp_oracle_audit_output_dir": None,
         "stp_oracle_audit_bootstrap_samples": 1,
         "stp_oracle_audit_shuffle_count": 1,
+        "stp_candidate_reliability_output_dir": None,
+        "stp_candidate_reliability_bootstrap_samples": 2000,
+        "stp_candidate_reliability_bootstrap_seed": 20260721,
+        "stp_candidate_reliability_shuffle_count": 20,
+        "stp_candidate_reliability_shuffle_seed_start": 20260721,
+        "stp_candidate_reliability_permutation_count": 20,
+        "stp_candidate_reliability_permutation_seed_start": 20260741,
         "wise_eval_alpha": None,
         "prototype_scale_grid": "50",
         "multi_prototype_k_grid": "1",
@@ -52,3 +59,19 @@ def test_oracle_audit_accepts_only_locked_drm_wise_val_audit_protocol():
 
     with pytest.raises(ValueError, match="IWildCamVal"):
         _validate_stp_mechanism_audit_args(SimpleNamespace(**{**vars(args), "eval_datasets": ["IWildCamOOD"]}))
+
+
+def test_candidate_reliability_accepts_only_frozen_drm_wise_protocol():
+    args = audit_args(
+        stp_mechanism_audit_output_dir=None,
+        stp_candidate_reliability_output_dir=Path("outputs/test-candidate-reliability"),
+        stp_mechanism_audit_foundation="drm_wise",
+        wise_eval_alpha=0.2,
+    )
+
+    _validate_stp_mechanism_audit_args(args)
+
+    with pytest.raises(ValueError, match="preregistered bootstrap"):
+        _validate_stp_mechanism_audit_args(
+            SimpleNamespace(**{**vars(args), "stp_candidate_reliability_shuffle_count": 19})
+        )

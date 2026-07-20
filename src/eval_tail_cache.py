@@ -39,6 +39,10 @@ from src.models.sctr import apply_tail_protective_sctr
 from src.models.stp_diagnostics import build_stp_diagnostics, paired_sequence_bootstrap
 from src.models.stp_audit_report import build_mechanism_audit_report, write_audit_artifacts
 from src.models.stp_audit_split import AUDIT_SPLIT_SEED, apply_normalized_loo_mean, build_location_audit_split
+from src.models.stp_candidate_reliability_audit import (
+    build_candidate_reliability_audit_report,
+    write_candidate_reliability_artifacts,
+)
 from src.models.stp_oracle_audit import build_oracle_audit_report, write_oracle_audit_artifacts
 from src.models.stp_confirmation import build_source_bundle_checksum, file_sha256, prepare_empty_ledger
 from src.models.tail_prototype import apply_tail_class_weights, tail_class_weights
@@ -158,6 +162,13 @@ def parse_arguments():
     parser.add_argument("--stp-oracle-audit-bootstrap-seed", type=int, default=20260720)
     parser.add_argument("--stp-oracle-audit-shuffle-count", type=int, default=20)
     parser.add_argument("--stp-oracle-audit-shuffle-seed-start", type=int, default=20260720)
+    parser.add_argument("--stp-candidate-reliability-output-dir", type=Path, default=None)
+    parser.add_argument("--stp-candidate-reliability-bootstrap-samples", type=int, default=2000)
+    parser.add_argument("--stp-candidate-reliability-bootstrap-seed", type=int, default=20260721)
+    parser.add_argument("--stp-candidate-reliability-shuffle-count", type=int, default=20)
+    parser.add_argument("--stp-candidate-reliability-shuffle-seed-start", type=int, default=20260721)
+    parser.add_argument("--stp-candidate-reliability-permutation-count", type=int, default=20)
+    parser.add_argument("--stp-candidate-reliability-permutation-seed-start", type=int, default=20260741)
     parser.add_argument("--vfep-pilot-output-dir", type=Path, default=None)
     parser.add_argument("--vfep-strength-grid", type=str, default="0,0.25,0.5,1")
     parser.add_argument("--vfep-stp-strength-grid", type=str, default="0,0.25,0.5,1")
@@ -329,6 +340,7 @@ def _metadata_rows(metadata_array):
 
 def _stp_audit_source_files():
     return (
+        "experiments/stp_candidate_reliability_audit_v0/preregistration.json",
         "experiments/stp_oracle_audit_v0/preregistration.json",
         "experiments/vfep_v0/preregistration.json",
         "src/__init__.py",
@@ -348,6 +360,7 @@ def _stp_audit_source_files():
         "src/models/stp_audit_split.py",
         "src/models/stp_audit_metrics.py",
         "src/models/stp_audit_report.py",
+        "src/models/stp_candidate_reliability_audit.py",
         "src/models/stp_oracle_audit.py",
         "src/models/stp_confirmation.py",
         "src/models/vfep.py",
@@ -361,11 +374,15 @@ def _stp_audit_source_files():
 def _validate_stp_mechanism_audit_args(args):
     vfep_output_dir = getattr(args, "vfep_pilot_output_dir", None)
     oracle_output_dir = getattr(args, "stp_oracle_audit_output_dir", None)
-    active_modes = sum(output is not None for output in (args.stp_mechanism_audit_output_dir, vfep_output_dir, oracle_output_dir))
+    candidate_output_dir = getattr(args, "stp_candidate_reliability_output_dir", None)
+    active_modes = sum(
+        output is not None
+        for output in (args.stp_mechanism_audit_output_dir, vfep_output_dir, oracle_output_dir, candidate_output_dir)
+    )
     if active_modes == 0:
         return
     if active_modes > 1:
-        raise ValueError("STP mechanism audit, STP oracle audit, and VFEP pilot modes are mutually exclusive.")
+        raise ValueError("STP mechanism, oracle, candidate-reliability, and VFEP modes are mutually exclusive.")
     if args.val_dataset != "IWildCamVal" or args.eval_datasets != ["IWildCamVal"]:
         raise ValueError("STP mechanism Phase A requires --val-dataset=IWildCamVal and --eval-datasets=IWildCamVal.")
     if args.max_eval_batches is not None or args.max_train_batches is not None:
@@ -376,6 +393,17 @@ def _validate_stp_mechanism_audit_args(args):
         args.stp_oracle_audit_bootstrap_samples < 1 or args.stp_oracle_audit_shuffle_count < 1
     ):
         raise ValueError("STP oracle audit bootstrap and shuffle counts must be positive.")
+    if candidate_output_dir is not None:
+        locked_candidate_protocol = (
+            args.stp_candidate_reliability_bootstrap_samples == 2000
+            and args.stp_candidate_reliability_bootstrap_seed == 20260721
+            and args.stp_candidate_reliability_shuffle_count == 20
+            and args.stp_candidate_reliability_shuffle_seed_start == 20260721
+            and args.stp_candidate_reliability_permutation_count == 20
+            and args.stp_candidate_reliability_permutation_seed_start == 20260741
+        )
+        if not locked_candidate_protocol:
+            raise ValueError("Candidate Reliability Audit v0 requires the preregistered bootstrap and control seeds/counts.")
     if vfep_output_dir is not None:
         if args.vfep_bootstrap_samples < 1 or args.vfep_shuffle_count < 1:
             raise ValueError("VFEP bootstrap and shuffle counts must be positive.")
@@ -388,7 +416,7 @@ def _validate_stp_mechanism_audit_args(args):
     if parse_float_grid(args.prototype_scale_grid) != [50.0] or parse_int_grid(args.multi_prototype_k_grid) != [1]:
         raise ValueError("STP mechanism Phase A is locked to TPA scale=50 and K=1.")
     foundation = "flyp" if vfep_output_dir is not None else args.stp_mechanism_audit_foundation
-    if oracle_output_dir is not None:
+    if oracle_output_dir is not None or candidate_output_dir is not None:
         foundation = "drm_wise"
     if foundation == "drm_wise" and args.wise_eval_alpha != 0.2:
         raise ValueError("DRM + WiSE Phase A requires --wise-eval-alpha=0.2.")
@@ -397,7 +425,7 @@ def _validate_stp_mechanism_audit_args(args):
     if args.cd_path is not None or parse_float_grid(args.cache_tau_grid) != [0.0] or parse_float_grid(args.tail_gamma_grid) != [0.0] or args.gate_mode_grid != "none" or parse_float_grid(args.gate_strength_grid) != [0.0]:
         raise ValueError("STP mechanism Phase A disables concept, logit-adjustment, tail-weight, and gate variants.")
     try:
-        output_dir = vfep_output_dir or oracle_output_dir or args.stp_mechanism_audit_output_dir
+        output_dir = vfep_output_dir or oracle_output_dir or candidate_output_dir or args.stp_mechanism_audit_output_dir
         output_dir.resolve().relative_to(Path.cwd().resolve())
     except ValueError as error:
         raise ValueError("STP mechanism audit artifacts must be written inside the repository workspace.") from error
@@ -416,8 +444,10 @@ def run_stp_mechanism_audit(
     wandb,
 ):
     oracle_output_dir = getattr(args, "stp_oracle_audit_output_dir", None)
+    candidate_output_dir = getattr(args, "stp_candidate_reliability_output_dir", None)
     oracle_mode = oracle_output_dir is not None
-    output_dir = (oracle_output_dir or args.stp_mechanism_audit_output_dir).resolve()
+    candidate_mode = candidate_output_dir is not None
+    output_dir = (oracle_output_dir or candidate_output_dir or args.stp_mechanism_audit_output_dir).resolve()
     val_dataset = build_eval_dataset("IWildCamVal", encoder, args, allow_ood_hp_subsample=False)
     metadata_fields = metadata_fields_from_dataset(val_dataset)
     sequence_field_index = resolve_metadata_field_index(metadata_fields, args.sequence_id_field, ["seq_id", "sequence_id", "sequence"])
@@ -449,14 +479,14 @@ def run_stp_mechanism_audit(
     location_digests = [hashlib.sha256(f"{AUDIT_SPLIT_SEED}|{location}".encode("utf-8")).hexdigest() for location in audit_split.audit_locations]
     manifest = {
         "phase": "val_audit_only",
-        "foundation": "drm_wise" if oracle_mode else args.stp_mechanism_audit_foundation,
+        "foundation": "drm_wise" if (oracle_mode or candidate_mode) else args.stp_mechanism_audit_foundation,
         "split_seed": AUDIT_SPLIT_SEED,
         "audit_location_digests": location_digests,
         "audit_frame_count": int(audit_indices.size),
         "sequence_field_index": sequence_field_index,
         "location_field_index": location_field_index,
         "location_incomplete_frame_count": int(audit_split.location_incomplete_mask.sum().item()),
-        "diagnostic_labels_opened_on_val_audit": oracle_mode,
+        "diagnostic_labels_opened_on_val_audit": oracle_mode or candidate_mode,
         "confirmation_performance_materialized": False,
         "ood_performance_materialized": False,
         "cct20_opened": False,
@@ -467,6 +497,36 @@ def run_stp_mechanism_audit(
         "classnames": list(train_data.classnames),
         "empty_class_index": 0,
     }
+    if candidate_mode:
+        report, fold_manifest = build_candidate_reliability_audit_report(
+            labels=audit_features["labels"],
+            tpa_logits=tpa_logits,
+            stp_logits=stp_mean_logits,
+            metadata=audit_features["metadata"],
+            location_keys=tuple(str(location) for location in audit_locations),
+            sequence_field_index=sequence_field_index,
+            location_field_index=location_field_index,
+            train_class_counts=train_counts.long(),
+            bootstrap_samples=args.stp_candidate_reliability_bootstrap_samples,
+            bootstrap_seed=args.stp_candidate_reliability_bootstrap_seed,
+            shuffle_seeds=tuple(
+                args.stp_candidate_reliability_shuffle_seed_start + index
+                for index in range(args.stp_candidate_reliability_shuffle_count)
+            ),
+            permutation_seeds=tuple(
+                args.stp_candidate_reliability_permutation_seed_start + index
+                for index in range(args.stp_candidate_reliability_permutation_count)
+            ),
+        )
+        write_candidate_reliability_artifacts(
+            output_dir,
+            preregistration_path=Path("experiments/stp_candidate_reliability_audit_v0/preregistration.json"),
+            fold_manifest=fold_manifest,
+            class_mapping=class_mapping,
+            report=report,
+        )
+        print(f"STP Candidate Reliability Audit v0 artifacts written to {output_dir}")
+        return
     if oracle_mode:
         report = build_oracle_audit_report(
             labels=audit_features["labels"],
@@ -1450,7 +1510,11 @@ def main(args):
         if wandb is not None:
             wandb.finish()
         return
-    if args.stp_mechanism_audit_output_dir is not None or args.stp_oracle_audit_output_dir is not None:
+    if (
+        args.stp_mechanism_audit_output_dir is not None
+        or args.stp_oracle_audit_output_dir is not None
+        or args.stp_candidate_reliability_output_dir is not None
+    ):
         run_stp_mechanism_audit(
             args,
             model,

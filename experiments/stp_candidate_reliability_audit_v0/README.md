@@ -29,7 +29,8 @@ The audit passes only if every promotion condition passes, including at least `+
 | ID | Task | Status | Artifact |
 | --- | --- | --- | --- |
 | CR-00 | Freeze question, feature whitelist, OOF protocol, controls, metrics, and gate | done | `experiments/stp_candidate_reliability_audit_v0/preregistration.json` |
-| CR-01 | Implement deterministic fold assignment, candidate rows, and diagnostic selector | todo | `src/models/stp_candidate_reliability_audit.py` |
-| CR-02 | Add protocol, leakage, control, receipt, and synthetic end-to-end tests | todo | `tests/test_stp_candidate_reliability_audit.py` |
-| CR-03 | Add a private Val-Audit-only Kaggle launcher and execute once | todo | `kaggle-stp-candidate-reliability-audit-v0/` |
+| CR-01 | Implement deterministic fold assignment, candidate rows, and diagnostic selector | done | `src/models/stp_candidate_reliability_audit.py` |
+| CR-02 | Add protocol, leakage, control, receipt, and synthetic end-to-end tests | done | `tests/test_stp_candidate_reliability_audit.py` |
+| CR-03a | Add a private Val-Audit-only Kaggle launcher | done | `kaggle-stp-candidate-reliability-audit-v0/` |
+| CR-03b | Execute the frozen Kaggle audit exactly once and archive output | todo | `outputs_log/kaggle-stp-candidate-reliability-audit-v0/` |
 | CR-04 | Verify downloaded hashes and apply the frozen promotion gate | todo | `experiments/stp_candidate_reliability_audit_v0/closure_receipt.json` |
