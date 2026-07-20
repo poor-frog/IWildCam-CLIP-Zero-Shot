@@ -374,7 +374,9 @@ def main():
             f"--wandb-run-prefix={WISE_WANDB_RUN_PREFIX}",
             "--audit-metadata",
         ]
-    if configure_wandb():
+    if STP_MECHANISM_AUDIT_OUTPUT_DIR or STP_ORACLE_AUDIT_OUTPUT_DIR:
+        command.append("--no-wandb")
+    elif configure_wandb():
         command.extend(["--wandb", "--wandb-project=PoorFrogs"])
         if not WISE_ALPHA_GRID:
             command.append(f"--wandb-run-name={WANDB_RUN_NAME}")
