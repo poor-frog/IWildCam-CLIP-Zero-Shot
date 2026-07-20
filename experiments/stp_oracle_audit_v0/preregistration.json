@@ -1,0 +1,56 @@
+{
+  "audit": "STP Oracle Audit v0",
+  "status": "locked_before_execution",
+  "purpose": "Measure remaining sequence-decision headroom and localize STP failure modes; oracle variants are diagnostic and not deployable methods.",
+  "foundation": {
+    "checkpoint": "converted_official_drm_iwildcam_vit_b16",
+    "wise_alpha": 0.2,
+    "prototype_count_per_class": 1,
+    "prototype_scale": 50.0,
+    "stp_eta": 0.5
+  },
+  "data_firewall": {
+    "allowed_split": "IWildCam Val-Audit",
+    "labels_opened_for_diagnostics": true,
+    "forbidden_splits": [
+      "Val-Confirm",
+      "IWildCamIDVal",
+      "IWildCamID",
+      "IWildCamOOD",
+      "CCT-20"
+    ],
+    "confirmation_predictions_materialized": false,
+    "ood_predictions_materialized": false
+  },
+  "primary_metric": "active-class macro-F1",
+  "reference": "STP self-inclusive mean, eta=0.5",
+  "oracles": {
+    "method_selection": "For each frame, select a correct prediction from TPA, STP mean, or STP LOO when one exists; otherwise retain STP mean.",
+    "sequence_candidate": "Select the true class only when it appears among TPA top-1 candidates in the real sequence; otherwise retain STP mean.",
+    "event_constant": "For non-singleton real sequences, broadcast the modal ground-truth class; singleton frames retain STP mean. This is an upper diagnostic bound, not a method."
+  },
+  "negative_control": {
+    "name": "within-location shuffled sequence consensus",
+    "preserve_location": true,
+    "preserve_sequence_lengths": true,
+    "shuffle_count": 20,
+    "seed_start": 20260720
+  },
+  "uncertainty": {
+    "location_cluster_bootstrap_samples": 2000,
+    "bootstrap_seed": 20260720
+  },
+  "predeclared_strata": [
+    "burst_length",
+    "sequence_label_taxonomy",
+    "true_class_frequency",
+    "tpa_confidence_quartile"
+  ],
+  "decision_gate": {
+    "primary_headroom_pp_lt_3": "stop_new_sequence_aggregators",
+    "primary_headroom_pp_ge_5": "targeted_method_only",
+    "otherwise": "inconclusive",
+    "primary_headroom": "method_selection_oracle_macro_f1_minus_stp_mean_macro_f1"
+  },
+  "claim_boundary": "Development-only error decomposition. No oracle result is a deployable performance claim and no held-out result may be inferred."
+}

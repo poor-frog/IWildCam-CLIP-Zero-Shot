@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "STP Oracle Audit v0 preregistration",
+  "type": "object",
+  "required": [
+    "audit",
+    "status",
+    "purpose",
+    "foundation",
+    "data_firewall",
+    "primary_metric",
+    "reference",
+    "oracles",
+    "negative_control",
+    "uncertainty",
+    "predeclared_strata",
+    "decision_gate",
+    "claim_boundary"
+  ],
+  "properties": {
+    "audit": {"const": "STP Oracle Audit v0"},
+    "status": {"const": "locked_before_execution"},
+    "data_firewall": {
+      "type": "object",
+      "required": ["allowed_split", "forbidden_splits", "confirmation_predictions_materialized", "ood_predictions_materialized"],
+      "properties": {
+        "allowed_split": {"const": "IWildCam Val-Audit"},
+        "confirmation_predictions_materialized": {"const": false},
+        "ood_predictions_materialized": {"const": false}
+      }
+    }
+  },
+  "additionalProperties": true
+}
