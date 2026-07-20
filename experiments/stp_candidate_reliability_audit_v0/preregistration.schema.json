@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "STP Candidate Reliability Audit v0 preregistration",
+  "type": "object",
+  "required": [
+    "audit",
+    "status",
+    "purpose",
+    "predecessor",
+    "claim_boundary",
+    "foundation",
+    "data_firewall",
+    "cross_validation",
+    "candidate_pool",
+    "feature_whitelist",
+    "diagnostic_selector",
+    "baselines",
+    "negative_controls",
+    "metrics",
+    "promotion_gate",
+    "reporting"
+  ],
+  "properties": {
+    "audit": {"const": "STP Candidate Reliability Audit v0"},
+    "status": {"const": "locked_before_implementation_and_execution"},
+    "data_firewall": {
+      "type": "object",
+      "required": [
+        "allowed_split",
+        "forbidden_splits",
+        "forbidden_features",
+        "confirmation_predictions_materialized",
+        "ood_predictions_materialized"
+      ],
+      "properties": {
+        "allowed_split": {"const": "IWildCam Val-Audit"},
+        "confirmation_predictions_materialized": {"const": false},
+        "ood_predictions_materialized": {"const": false}
+      }
+    },
+    "cross_validation": {
+      "type": "object",
+      "required": ["scheme", "fold_count", "fold_seed", "assignment", "fit_scope", "pooled_primary_evaluation"],
+      "properties": {
+        "scheme": {"const": "five_fold_location_grouped_out_of_fold"},
+        "fold_count": {"const": 5},
+        "fold_seed": {"const": 20260721}
+      }
+    },
+    "promotion_gate": {
+      "type": "object",
+      "required": [
+        "all_conditions_required",
+        "macro_f1_gain_vs_stp_pp_minimum",
+        "location_bootstrap_lower_bound_gt_zero",
+        "pass_action",
+        "fail_action"
+      ],
+      "properties": {
+        "all_conditions_required": {"const": true},
+        "macro_f1_gain_vs_stp_pp_minimum": {"const": 3.0},
+        "location_bootstrap_lower_bound_gt_zero": {"const": true}
+      }
+    }
+  },
+  "additionalProperties": true
+}

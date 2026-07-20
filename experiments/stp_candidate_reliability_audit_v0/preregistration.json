@@ -1,0 +1,160 @@
+{
+  "audit": "STP Candidate Reliability Audit v0",
+  "status": "locked_before_implementation_and_execution",
+  "date_locked": "2026-07-21",
+  "purpose": "Test whether a fixed, label-free feature set can identify the correct class candidate already present inside a real event. This is a cross-validated feasibility probe, not a deployable method result.",
+  "predecessor": {
+    "audit": "STP Oracle Audit v0",
+    "closure_commit": "9331465ff4267925823c8356dffe1e756fd09a40",
+    "closure_receipt_path": "experiments/stp_oracle_audit_v0/closure_receipt.json",
+    "closure_receipt_sha256": "533b3da8eccbed5f732e671507cb98e86fe03f423049d4350127848fd0d7a2ae",
+    "frozen_outcome": "stop_new_sequence_aggregators",
+    "method_selection_headroom": 0.013372212648391724,
+    "sequence_candidate_oracle_headroom": 0.1581813395023346
+  },
+  "claim_boundary": "Development-only rankability diagnostic. It may authorize one later candidate-reranker experiment, but it is not itself evidence of held-out or OOD generalization.",
+  "foundation": {
+    "checkpoint": "converted_official_drm_iwildcam_vit_b16",
+    "wise_alpha": 0.2,
+    "prototype_count_per_class": 1,
+    "prototype_scale": 50.0,
+    "stp_eta": 0.5,
+    "reference": "STP self-inclusive mean"
+  },
+  "data_firewall": {
+    "allowed_split": "IWildCam Val-Audit",
+    "labels_allowed_only_for_fold_training_and_scoring": true,
+    "forbidden_splits": [
+      "Val-Confirm",
+      "IWildCamIDVal",
+      "IWildCamID",
+      "IWildCamOOD",
+      "CCT-20"
+    ],
+    "forbidden_features": [
+      "ground_truth_label",
+      "location_identifier",
+      "sequence_identifier",
+      "fold_identifier",
+      "future_held_out_metrics"
+    ],
+    "confirmation_predictions_materialized": false,
+    "ood_predictions_materialized": false
+  },
+  "cross_validation": {
+    "scheme": "five_fold_location_grouped_out_of_fold",
+    "fold_count": 5,
+    "fold_seed": 20260721,
+    "assignment": "Sort locations by sha256(fold_seed|canonical_location), then assign round-robin to folds 0 through 4.",
+    "training_locations_per_fold": 16,
+    "evaluation_locations_per_fold": 4,
+    "fit_scope": "Training folds only, including feature standardization and logistic-regression fitting.",
+    "pooled_primary_evaluation": "Concatenate exactly one out-of-fold prediction for every eligible Val-Audit frame.",
+    "viability": {
+      "minimum_evaluation_locations_per_fold": 4,
+      "minimum_evaluation_frames_per_fold": 100,
+      "minimum_supported_classes_per_fold": 5,
+      "failure_action": "Write a blocked receipt and do not report a promotion decision."
+    }
+  },
+  "candidate_pool": {
+    "definition": "Sorted union of TPA top-1 predicted classes across the frame's real sequence.",
+    "query_fallback": "If the candidate pool is empty, retain the STP prediction.",
+    "singleton_policy": "Retain the STP prediction.",
+    "candidate_pool_labels_used": false,
+    "candidate_pool_oracle_used_for_prediction": false
+  },
+  "feature_whitelist": [
+    "query_tpa_probability_for_candidate",
+    "query_tpa_logit_for_candidate",
+    "query_candidate_rank",
+    "query_top1_margin",
+    "sequence_mean_probability_for_candidate",
+    "sequence_max_probability_for_candidate",
+    "sequence_vote_fraction_for_candidate",
+    "leave_one_out_vote_fraction_for_candidate",
+    "leave_one_out_mean_probability_for_candidate",
+    "stp_logit_for_candidate",
+    "candidate_train_class_log_count",
+    "candidate_is_empty",
+    "sequence_length"
+  ],
+  "diagnostic_selector": {
+    "model": "L2 logistic regression",
+    "regularization_C": 1.0,
+    "class_weight": "balanced",
+    "maximum_iterations": 1000,
+    "random_seed": 20260721,
+    "target": "candidate_equals_query_ground_truth",
+    "standardization": "Fit mean and standard deviation on candidate rows from training locations only.",
+    "selection": "Choose the candidate with maximum predicted reliability.",
+    "tie_break": [
+      "higher_query_stp_logit",
+      "smaller_class_index"
+    ],
+    "no_hyperparameter_search": true
+  },
+  "baselines": [
+    "TPA query top-1",
+    "STP self-inclusive mean eta=0.5",
+    "sequence plurality candidate",
+    "sequence mean-probability candidate"
+  ],
+  "negative_controls": {
+    "within_location_sequence_shuffle": {
+      "count": 20,
+      "seed_start": 20260721,
+      "preserve_location": true,
+      "preserve_sequence_lengths": true
+    },
+    "training_target_permutation": {
+      "count": 20,
+      "seed_start": 20260741,
+      "permutation_scope": "Within each training fold; evaluation labels remain untouched."
+    }
+  },
+  "metrics": {
+    "primary": "active-class macro-F1 on pooled out-of-fold predictions",
+    "secondary": [
+      "top-1 accuracy",
+      "animal-only macro-F1",
+      "tail-class macro-F1",
+      "empty-to-animal error count",
+      "animal-to-empty error count",
+      "fraction of the sequence-candidate oracle headroom captured"
+    ],
+    "uncertainty": {
+      "bootstrap": "paired location-cluster bootstrap",
+      "samples": 2000,
+      "seed": 20260721,
+      "confidence_interval": 0.95
+    }
+  },
+  "promotion_gate": {
+    "all_conditions_required": true,
+    "macro_f1_gain_vs_stp_pp_minimum": 3.0,
+    "location_bootstrap_lower_bound_gt_zero": true,
+    "animal_macro_f1_non_regression": true,
+    "tail_macro_f1_regression_tolerance_pp": 0.5,
+    "empty_animal_total_error_non_increase": true,
+    "real_gain_minus_shuffle_median_pp_minimum": 1.0,
+    "permuted_target_gain_median_pp_maximum": 0.5,
+    "pass_action": "Authorize exactly one separately preregistered candidate-reranker v0 experiment.",
+    "fail_action": "Close candidate reliability and all further sequence-inference method development on this foundation.",
+    "inconclusive_action": "If bootstrap inference is invalid or a control cannot be evaluated, repair the audit without opening a held-out split and rerun the same frozen specification."
+  },
+  "reporting": {
+    "required_artifacts": [
+      "preregistration.json",
+      "fold_manifest.json",
+      "class_mapping.json",
+      "candidate_reliability_audit_v0.json",
+      "candidate_reliability_audit_v0.md",
+      "audit_receipt.json"
+    ],
+    "immutable_output_directory": true,
+    "per_fold_metrics_descriptive_only": true,
+    "out_of_fold_predictions_required": true,
+    "raw_location_ids_forbidden_in_report": true
+  }
+}
