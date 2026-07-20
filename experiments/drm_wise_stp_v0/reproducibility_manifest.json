@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "experiment_id": "drm-wise-stp-v0-iwildcam",
+  "manifest_created_at": "2026-07-20T16:33:58+07:00",
+  "status": "current_best_observed_single_checkpoint_result",
+  "claim_boundary": {
+    "allowed": "Post-hoc STP evaluation on one converted official DRM checkpoint under the matched PoorFrogs protocol.",
+    "disallowed": [
+      "official DRM reproduction",
+      "joint DRM and STP training",
+      "multi-seed DRM result",
+      "paper-level state of the art"
+    ]
+  },
+  "result_run": {
+    "provider": "weights_and_biases",
+    "entity": "poorfrogs",
+    "project": "PoorFrogs",
+    "run_id": "03gg65vx",
+    "run_name": "drm-wise-stp-vitb16-iwildcamval-final-alpha0p2",
+    "url": "https://wandb.ai/poorfrogs/PoorFrogs/runs/03gg65vx",
+    "state": "finished",
+    "created_at": "2026-07-12T00:10:49Z",
+    "verified_via_api_at": "2026-07-20T16:33:58+07:00"
+  },
+  "source_checkout": {
+    "remote": "https://github.com/poor-frog/IWildCam-CLIP-Zero-Shot.git",
+    "commit": "c1d2290035285c512b2bcfd4e3a5c55f76fdbe1e",
+    "verification": "Recorded by W&B run metadata for the final run and all ten selection runs."
+  },
+  "manifest_generation_checkout": {
+    "branch": "main",
+    "head": "b8300f86d7e2394862cf8bfd22197a78f2880261",
+    "worktree_clean": false,
+    "authoritative_for_result_code": false
+  },
+  "execution": {
+    "kaggle_kernel_id": "huyphmhakq/poorfrogs-drm-wise-stp-iwildcam",
+    "machine_shape": "NvidiaTeslaT4",
+    "gpu_enabled": true,
+    "internet_enabled": true,
+    "python": "CPython 3.12.13",
+    "program_recorded_by_wandb": "/kaggle/working/IWildCam-CLIP-Zero-Shot/src/eval_tail_cache.py",
+    "entrypoint": "kaggle-drm-wise-stp/kaggle_main.py",
+    "orchestrator": "kaggle_eval_drm_stmp_adapter.py",
+    "selection_driver": "src/eval_drm_wise_stp.py",
+    "evaluator": "src/eval_tail_cache.py"
+  },
+  "checkpoint": {
+    "source": {
+      "filename": "iwildcam_vit_b16.pt",
+      "local_path": "kaggle-checkpoints/drm-iwildcam-vitb16-checkpoint/iwildcam_vit_b16.pt",
+      "local_available": true,
+      "size_bytes": 598899342,
+      "sha256": "b3ad591fcbbc452d60a8f8ddf446aa6af61fbea5bad671487b079f6a80a434be",
+      "kernel_dataset_source": "klinh1912/drm-iwildcam-vitb16-checkpoint",
+      "local_dataset_metadata_id": "huyphmhakq/drm-iwildcam-vitb16-checkpoint",
+      "provenance_discrepancy": "The kernel input owner and the downloaded local metadata owner differ; the checkpoint bytes are bound by SHA-256."
+    },
+    "converted": {
+      "runtime_path": "/kaggle/working/drm_iwildcam_vit_b16_poorfrogs_clip_encoder.pt",
+      "local_available": false,
+      "sha256": null,
+      "weight_reconstruction_recipe_available": true,
+      "byte_exact_reconstruction_verified": false
+    },
+    "drm_loader_repository": {
+      "remote": "https://github.com/vaynexie/DRM.git",
+      "commit": null,
+      "commit_recorded_at_runtime": false
+    }
+  },
+  "dataset_protocol": {
+    "dataset": "iWildCam 2020 WILDS",
+    "kaggle_dataset_source": "thanhquang71/iwildcam-v2-0-2020-wilds-dataset",
+    "train_split": "IWildCam",
+    "selection_split": "IWildCamVal",
+    "final_splits": [
+      "IWildCamIDVal",
+      "IWildCamVal",
+      "IWildCamID",
+      "IWildCamOOD"
+    ],
+    "primary_selection_metric": "F1-macro_all",
+    "sequence_id_field": "auto",
+    "dataset_snapshot_checksum_recorded": false
+  },
+  "selected_configuration": {
+    "model": "ViT-B/16",
+    "template": "iwildcam_drm_template",
+    "wise_alpha": 0.2,
+    "prototype_scale": 50.0,
+    "prototype_k": 1,
+    "multi_prototype_reduction": "max",
+    "sequence_eta": 0.5,
+    "tau": 0.0,
+    "tail_gamma": 0.0,
+    "gate_mode": "none",
+    "gate_strength": 0.0,
+    "sctr_strength": 0.0,
+    "sctr_tail_protection": 0.0
+  },
+  "wise_selection": [
+    {"alpha": 0.0, "run_id": "2cj6gpwp", "val_macro_f1": 0.4211281538009643},
+    {"alpha": 0.1, "run_id": "07gcpc90", "val_macro_f1": 0.4241279661655426},
+    {"alpha": 0.2, "run_id": "3yzrclxo", "val_macro_f1": 0.437046617269516},
+    {"alpha": 0.3, "run_id": "obca1ejy", "val_macro_f1": 0.4326763451099396},
+    {"alpha": 0.4, "run_id": "0uz5djhf", "val_macro_f1": 0.42422494292259216},
+    {"alpha": 0.5, "run_id": "j2j402va", "val_macro_f1": 0.4355422556400299},
+    {"alpha": 0.6, "run_id": "h8a7s3jr", "val_macro_f1": 0.4287751019001007},
+    {"alpha": 0.7, "run_id": "10o091b6", "val_macro_f1": 0.3943938016891479},
+    {"alpha": 0.8, "run_id": "xc4m9gmh", "val_macro_f1": 0.3466576933860779},
+    {"alpha": 0.9, "run_id": "ob7mbli7", "val_macro_f1": 0.2771962583065033}
+  ],
+  "final_metrics": {
+    "IWildCamIDVal": {"top1": 0.8133715987205505, "macro_f1": 0.5298160910606384},
+    "IWildCamVal": {"top1": 0.623688280582428, "macro_f1": 0.437046617269516},
+    "IWildCamID": {"top1": 0.7706646919250488, "macro_f1": 0.5794510841369629},
+    "IWildCamOOD": {"top1": 0.7635951638221741, "macro_f1": 0.42423877120018005}
+  },
+  "source_files": [
+    {"path": "kaggle-drm-wise-stp/kaggle_main.py", "sha256_at_source_commit": "9333cb40cadb21aed52f3e0886e475e7a95f7890e1cffed5d56b7c1025c4dad8"},
+    {"path": "kaggle_eval_drm_stmp_adapter.py", "sha256_at_source_commit": "f93143104f6d2a8be1cc8f1fc6c15cffddeb62203cccc02f71f6931ebd0ccc39"},
+    {"path": "src/eval_drm_wise_stp.py", "sha256_at_source_commit": "239a047d63ef2c06e76ef2ba3b228eff56ae3fc20dd599f3b5185eb687e3cd3f"},
+    {"path": "src/eval_tail_cache.py", "sha256_at_source_commit": "6cf7685a45fad4e4f140ca26a115520b5ac22435414d779e73a1c8909c9af6fc"},
+    {"path": "src/models/stmp_adapter.py", "sha256_at_source_commit": "842e89cb960e9d81cf45cb911328cd70e8e089a4249833379273a6b25bf473b9"},
+    {"path": "src/models/clip_encoder.py", "sha256_at_source_commit": "f10168b3cc3619bb8f55e5483d0d7c855707f7c6870e3f9665d2f9590fcb73e6"},
+    {"path": "src/models/flyp.py", "sha256_at_source_commit": "fd707f39588ed1111d60edb4759931ab802a598418961d7e56906d11e6728569"},
+    {"path": "src/datasets/iwildcam.py", "sha256_at_source_commit": "1e730d4a3727c746ee28be951fdf7ad3476e45f6fa4e44e2aca909b27d9e418a"},
+    {"path": "src/templates/iwildcam_drm.py", "sha256_at_source_commit": "41b3beef55fd5ec1142b60fc081064701c7172788c51e17f67d87df7c6bc65be"}
+  ],
+  "runtime_mutations": {
+    "patched_evaluator_sha256": "52bfaf7adbe98e439ab542ae053bbb337a142768bfd46adf8350080f24a27564",
+    "patch_function": "patch_tail_cache_eval_guard",
+    "dynamic_dataset_registration": "patch_iwildcam_val"
+  },
+  "local_evidence": [
+    {
+      "path": "outputs/drm_wise_stp_kaggle_2026-07-12.md",
+      "size_bytes": 2932,
+      "sha256": "3b915a52abd7506cd550cfebe0988afcc8a109a07c84383452bc0cf187a7ad44",
+      "role": "human_readable_result_summary"
+    }
+  ],
+  "wandb_file_inventory": [
+    {"name": "config.yaml", "size_bytes": 6110, "md5_base64": "S8TJIXpRlrAtdwYqePRjWQ=="},
+    {"name": "output.log", "size_bytes": 7814, "md5_base64": "qjlnjO6ZpjjKfmwkHq7lVg=="},
+    {"name": "requirements.txt", "size_bytes": 18481, "md5_base64": "gp2Mj3WnN5PkuKIjUU/z1A=="},
+    {"name": "wandb-metadata.json", "size_bytes": 2564, "md5_base64": "KzQdJXCRuw6gawNL4d+o3Q=="},
+    {"name": "wandb-summary.json", "size_bytes": 3821, "md5_base64": "zQwB+1+/HMEPi5Ch4FZiRQ=="}
+  ],
+  "known_provenance_gaps": [
+    "The converted checkpoint was ephemeral in /kaggle/working and is not available locally for byte-level hashing.",
+    "The DRM loader repository commit used during conversion was not recorded.",
+    "The iWildCam Kaggle dataset snapshot was not bound by a dataset-level checksum.",
+    "The result evaluates one DRM checkpoint and does not measure DRM training-seed variance."
+  ]
+}
