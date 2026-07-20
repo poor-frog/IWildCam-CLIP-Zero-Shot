@@ -1,0 +1,96 @@
+{
+  "audit": "STP Oracle Audit v0",
+  "status": "closed",
+  "closure_date": "2026-07-20",
+  "execution": {
+    "kernel": "klinh1912/poorfrogs-stp-oracle-audit-v0",
+    "kernel_status": "COMPLETE",
+    "runtime_seconds": 2460,
+    "source_commit": "a3f6f525dc1bb8307d7dd4f450f03cbb8c14a4c4",
+    "foundation": "drm_wise",
+    "wise_alpha": 0.2,
+    "prototype_scale": 50.0,
+    "prototype_count_per_class": 1,
+    "stp_eta": 0.5
+  },
+  "integrity": {
+    "all_receipt_bound_artifacts_verified": true,
+    "preregistration_semantically_identical_to_frozen_local_copy": true,
+    "artifact_sha256": {
+      "audit_manifest.json": "d6fd0b596ca40a3264bb7dba5b0ceb4e8c9260e305c652cc083ce0b1ecb59fa6",
+      "class_mapping.json": "3191d1df8d98562851a745fdf240610e26f9f1003bcd2da25b2fd9f79dad10f3",
+      "preregistration.json": "5f5da80147b9d6e5ab142c849cde522dc57e25c2fc9ce3f67c8fc94787197552",
+      "stp_oracle_audit_v0.json": "f552a068384513a2332413846e97f7d1403d1a6eebae32414753f8c9a5471dab",
+      "stp_oracle_audit_v0.md": "20a80f491e58b28af0dc1b4cf6713ea2da90ca0809ea36852a9c49588fd143a9"
+    },
+    "class_mapping_sha256": "a30f6b7b0ed95acc580fda161413d0117591ad0a7fcbcd34d04058a138bef2f0",
+    "class_count": 182,
+    "empty_class_index": 0
+  },
+  "audit_population": {
+    "split": "IWildCam Val-Audit",
+    "frame_count": 10654,
+    "sequence_count": 1747,
+    "location_count": 20
+  },
+  "results": {
+    "stp_reference": {
+      "macro_f1": 0.42855849862098694,
+      "top1": 0.5873849987983704
+    },
+    "method_selection_oracle": {
+      "macro_f1": 0.44193071126937866,
+      "headroom": 0.013372212648391724,
+      "location_bootstrap_95_ci": [
+        0.009664001874625683,
+        0.022145064547657967
+      ],
+      "recoverable_error_count": 195,
+      "introduced_error_count": 0
+    },
+    "sequence_candidate_oracle": {
+      "macro_f1": 0.5867398381233215,
+      "headroom": 0.1581813395023346,
+      "location_bootstrap_95_ci": [
+        0.12273247539997101,
+        0.1763031929731369
+      ],
+      "diagnostic_only": true
+    },
+    "event_constant_oracle": {
+      "macro_f1": 0.8152503371238708,
+      "headroom": 0.3866918385028839,
+      "location_bootstrap_95_ci": [
+        0.21141432225704193,
+        0.46697941422462463
+      ],
+      "diagnostic_only": true
+    },
+    "within_location_shuffle_control": {
+      "shuffle_count": 20,
+      "median_macro_f1": 0.39686858654022217,
+      "real_stp_minus_shuffle_median": 0.03168991208076477
+    }
+  },
+  "frozen_decision": {
+    "primary_quantity": "method_selection_oracle_macro_f1_minus_stp_mean_macro_f1",
+    "observed_headroom": 0.013372212648391724,
+    "stop_threshold_exclusive": 0.03,
+    "outcome": "stop_new_sequence_aggregators",
+    "required_action": "Close the current sequence-aggregator search. Do not promote another mean, LOO, attention, or gating variant from this audit."
+  },
+  "confirmation_viability": {
+    "viability_pass": false,
+    "confirm_location_count": 12,
+    "confirm_supported_class_fraction": 0.6266666666666667,
+    "confirm_supported_tail_class_count": 4,
+    "action": "Do not open Val-Confirm performance."
+  },
+  "firewall": {
+    "diagnostic_labels_opened_on_val_audit": true,
+    "val_confirm_predictions_materialized": false,
+    "iwildcam_ood_predictions_materialized": false,
+    "cct20_opened": false
+  },
+  "claim_boundary": "Development-only error decomposition. The label-aware oracle results are not deployable performance results and do not establish held-out generalization."
+}

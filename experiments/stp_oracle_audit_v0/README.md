@@ -12,7 +12,8 @@ The authoritative protocol is [`preregistration.json`](preregistration.json). Th
 | OA-01 | Implement three diagnostic oracles, within-location shuffle control, strata, and immutable receipt | done | `src/models/stp_oracle_audit.py` |
 | OA-02 | Integrate Val-Audit-only evaluator and Kaggle launcher | done | `src/eval_tail_cache.py`, `kaggle-stp-oracle-audit-v0/` |
 | OA-03 | Validate compile, unit boundaries, package contract, and synthetic artifact generation | done | `tests/test_stp_oracle_audit.py`, `tests/test_kaggle_stp_oracle_audit_package.py` |
-| OA-04 | Execute the frozen full-data Kaggle audit and archive downloaded output | todo | `outputs_log/kaggle-stp-oracle-audit-v0/` |
+| OA-04 | Execute the frozen full-data Kaggle audit and archive downloaded output | done | `outputs_log/kaggle-stp-oracle-audit-v0/` |
+| OA-05 | Verify artifact hashes, apply the frozen decision gate, and close the audit | done | `experiments/stp_oracle_audit_v0/closure_receipt.json`, `experiments/stp_oracle_audit_v0/final_assessment.md` |
 
 ## Frozen interpretation
 
@@ -27,4 +28,5 @@ The real-event minus shuffled-event result diagnoses whether sequence membership
 - The output directory must be empty; the writer refuses overwrite.
 - The receipt must state that Val-Confirm and OOD predictions were not materialized.
 - The output must bind the preregistration, manifest, class mapping, JSON report, and Markdown report by SHA-256.
-- A full-data result is not available until OA-04 completes and the downloaded artifact passes the receipt/hash checks.
+- OA-04 completed on Kaggle kernel `klinh1912/poorfrogs-stp-oracle-audit-v0`; all receipt-bound artifacts passed SHA-256 verification.
+- The audit is closed with `stop_new_sequence_aggregators`. Val-Confirm and OOD remain unopened for performance evaluation.
