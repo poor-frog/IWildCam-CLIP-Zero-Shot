@@ -1,8 +1,8 @@
 import os
-import random
 from pathlib import Path
 
-import numpy as np
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 import torch
 from torch.utils.data import DataLoader
 
@@ -18,6 +18,13 @@ from src.models.tail_prototype import build_class_prototypes_from_loader
 from src.models.zeroshot import get_zeroshot_classifier
 from src.train_coop import build_eval_dataset, get_validation_score, log_wandb_summary
 from src.train_maple_full import build_step_lr_scheduler, init_wandb
+from src.training_determinism import (
+    build_determinism_receipt,
+    configure_training_determinism,
+    make_torch_generator,
+    seed_data_loader_worker,
+    write_json_receipt_refusing_overwrite,
+)
 
 
 OPEN_CLIP_FLYP_MODELS = {"ViT-B-16", "ViT-L-14"}
@@ -156,6 +163,8 @@ def maybe_prepare_btel(model, train_data, args):
         batch_sampler=sampler,
         num_workers=args.workers,
         pin_memory=str(args.device).startswith("cuda"),
+        generator=make_torch_generator(args.seed),
+        worker_init_fn=seed_data_loader_worker,
     )
     print(
         "Built BTEL artifacts: "
@@ -270,9 +279,13 @@ def maybe_build_tail_teacher_head(tail_teacher_model, args):
 
 
 def main(args):
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    deterministic_training = bool(getattr(args, "deterministic_training", False))
+    determinism_receipt_path = getattr(args, "determinism_receipt", None)
+    if deterministic_training != (determinism_receipt_path is not None):
+        raise ValueError("--deterministic-training and --determinism-receipt must be used together.")
+    if determinism_receipt_path is not None and Path(determinism_receipt_path).exists():
+        raise FileExistsError(f"Refusing to overwrite determinism receipt: {determinism_receipt_path}")
+    runtime_determinism = configure_training_determinism(args.seed, deterministic=deterministic_training)
     if args.template is None:
         args.template = "iwildcam_template"
     ensure_open_clip_for_flyp(args.model)
@@ -286,6 +299,7 @@ def main(args):
         location=args.data_location,
         batch_size=args.batch_size,
         num_workers=args.workers,
+        seed=args.seed,
     )
     val_dataset = None
     wise_alphas = parse_wise_alphas(getattr(args, "wise_alphas", None))
@@ -319,6 +333,7 @@ def main(args):
     best_epoch = None
     best_checkpoint_path = resolve_flyp_best_checkpoint_path(args)
     selected_wise_alpha = getattr(args, "wise_eval_alpha", None)
+    amp_skipped_step_count = 0
     if selected_wise_alpha is not None and not (0.0 <= selected_wise_alpha <= 1.0):
         raise ValueError(f"--wise-eval-alpha must be in [0, 1], got {selected_wise_alpha}")
     for epoch in range(1, args.epochs + 1):
@@ -345,6 +360,7 @@ def main(args):
             scaler=scaler,
         )
         print(f"Epoch {epoch}: loss={stats.loss:.4f}")
+        amp_skipped_step_count += stats.optimizer_skipped_step_count
         if wandb is not None:
             wandb.log({
                 "train/epoch_loss": stats.loss,
@@ -452,6 +468,16 @@ def main(args):
 
     print_flyp_summary(summary_rows)
     log_wandb_summary(wandb, summary_rows)
+    if determinism_receipt_path is not None:
+        receipt = build_determinism_receipt(
+            args,
+            runtime_determinism,
+            best_epoch=best_epoch,
+            selected_wise_alpha=selected_wise_alpha,
+            amp_skipped_step_count=amp_skipped_step_count,
+        )
+        output_path = write_json_receipt_refusing_overwrite(determinism_receipt_path, receipt)
+        print(f"Wrote immutable training determinism receipt to {output_path}")
 
 
 if __name__ == "__main__":

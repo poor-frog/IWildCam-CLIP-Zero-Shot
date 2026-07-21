@@ -869,7 +869,7 @@ class FlypDrmTest(unittest.TestCase):
         self.assertGreater(stats.drm_loss, 0.0)
         self.assertAlmostEqual(scaler.scaled_loss.loss.item(), stats.loss, places=6)
 
-    def test_train_flyp_one_epoch_lets_grad_scaler_skip_nonfinite_amp_step(self):
+    def test_train_flyp_one_epoch_records_grad_scaler_skipped_step(self):
         from src.models.flyp import train_flyp_one_epoch
 
         class TinyTokenizer:
@@ -880,7 +880,6 @@ class FlypDrmTest(unittest.TestCase):
             def __init__(self):
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.eye(2))
-                self.weight.register_hook(lambda grad: torch.full_like(grad, float("nan")))
 
             def forward(self, images, text):
                 features = images @ self.weight
@@ -930,7 +929,7 @@ class FlypDrmTest(unittest.TestCase):
         scheduler = FakeScheduler()
 
         with patch("src.models.flyp.open_clip.get_tokenizer", return_value=TinyTokenizer()):
-            train_flyp_one_epoch(
+            stats = train_flyp_one_epoch(
                 model,
                 [batch],
                 optimizer,
@@ -944,6 +943,56 @@ class FlypDrmTest(unittest.TestCase):
 
         self.assertEqual(scaler.calls, ["scale", "unscale", "step", "update"])
         self.assertEqual(scheduler.steps, 0)
+        self.assertEqual(stats.optimizer_skipped_step_count, 1)
+
+    def test_train_flyp_one_epoch_rejects_nonfinite_amp_gradient_after_unscale(self):
+        from src.models.flyp import train_flyp_one_epoch
+
+        class TinyTokenizer:
+            def __call__(self, captions):
+                return torch.zeros(len(captions), 4, dtype=torch.long)
+
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.eye(2))
+                self.weight.register_hook(lambda grad: torch.full_like(grad, float("nan")))
+
+            def forward(self, images, text):
+                features = images @ self.weight
+                return features, features, torch.ones(())
+
+        class FakeScaledLoss:
+            def __init__(self, loss):
+                self.loss = loss
+
+            def backward(self):
+                self.loss.backward()
+
+        class FakeScaler:
+            def scale(self, loss):
+                return FakeScaledLoss(loss)
+
+            def unscale_(self, optimizer):
+                pass
+
+        model = TinyModel()
+        batch = {"images": torch.eye(2), "labels": torch.tensor([0, 1])}
+        args = SimpleNamespace(device="cpu", model="ViT-B-16", max_train_batches=1, use_amp=True)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+        with patch("src.models.flyp.open_clip.get_tokenizer", return_value=TinyTokenizer()):
+            with self.assertRaisesRegex(FloatingPointError, "non-finite gradient"):
+                train_flyp_one_epoch(
+                    model,
+                    [batch],
+                    optimizer,
+                    args,
+                    ["frog", "deer"],
+                    [lambda c: f"a photo of {c}."],
+                    epoch=1,
+                    scaler=FakeScaler(),
+                )
 
     def test_drm_loss_gradient_matches_regularization_derivative(self):
         from src.models.flyp import compute_drm_loss
@@ -1170,7 +1219,28 @@ class FlypCloneStateDictTest(unittest.TestCase):
 
 
 class FlypMainAmpTest(unittest.TestCase):
-    def _run_main_with_precision(self, maple_precision):
+    def test_deterministic_training_requires_new_receipt_path(self):
+        import tempfile
+        from pathlib import Path
+
+        import src.train_flyp as train_flyp
+
+        missing = SimpleNamespace(seed=0, deterministic_training=True, determinism_receipt=None)
+        with self.assertRaisesRegex(ValueError, "must be used together"):
+            train_flyp.main(missing)
+
+        with tempfile.TemporaryDirectory() as directory:
+            existing_path = Path(directory) / "receipt.json"
+            existing_path.write_text("{}", encoding="utf-8")
+            existing = SimpleNamespace(
+                seed=0,
+                deterministic_training=True,
+                determinism_receipt=str(existing_path),
+            )
+            with self.assertRaisesRegex(FileExistsError, "Refusing to overwrite"):
+                train_flyp.main(existing)
+
+    def _run_main_with_precision(self, maple_precision, determinism_receipt=None):
         import src.train_flyp as train_flyp
 
         class TinyClipEncoder(torch.nn.Module):
@@ -1189,17 +1259,20 @@ class FlypMainAmpTest(unittest.TestCase):
             classnames = ["frog", "deer"]
             train_loader = [{"images": torch.eye(2), "labels": torch.tensor([0, 1])}]
 
-            def __init__(self, preprocess, location, batch_size, num_workers):
+            def __init__(self, preprocess, location, batch_size, num_workers, seed):
+                captured["dataset_seed"] = seed
                 pass
 
         captured = {}
 
         def fake_train_flyp_one_epoch(*args, **kwargs):
             captured["scaler"] = kwargs.get("scaler")
-            return SimpleNamespace(epoch=1, loss=0.0, lr=0.0)
+            return SimpleNamespace(epoch=1, loss=0.0, lr=0.0, optimizer_skipped_step_count=0)
 
         args = SimpleNamespace(
             seed=0,
+            deterministic_training=determinism_receipt is not None,
+            determinism_receipt=determinism_receipt,
             template="iwildcam_template",
             model="ViT-B-16",
             device="cuda",
@@ -1233,6 +1306,7 @@ class FlypMainAmpTest(unittest.TestCase):
                 patch.object(train_flyp, "init_wandb", return_value=None), \
                 patch.object(train_flyp, "train_flyp_one_epoch", side_effect=fake_train_flyp_one_epoch), \
                 patch.object(train_flyp, "parse_wise_alphas", return_value=[]), \
+                patch.object(train_flyp, "configure_training_determinism", return_value={"seed": 0}), \
                 patch("src.train_flyp.torch.cuda.is_available", return_value=True):
             train_flyp.main(args)
 
@@ -1243,12 +1317,28 @@ class FlypMainAmpTest(unittest.TestCase):
 
         self.assertTrue(args.use_amp)
         self.assertIsNotNone(captured["scaler"])
+        self.assertEqual(captured["dataset_seed"], 0)
 
     def test_main_disables_grad_scaler_when_fp32_precision_requested(self):
         args, captured = self._run_main_with_precision("fp32")
 
         self.assertFalse(args.use_amp)
         self.assertIsNone(captured["scaler"])
+
+    def test_main_writes_requested_determinism_receipt(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            receipt_path = Path(directory) / "runtime_determinism_receipt.json"
+            self._run_main_with_precision("fp32", determinism_receipt=str(receipt_path))
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(receipt["status"], "complete")
+        self.assertEqual(receipt["seed"], 0)
+        self.assertEqual(receipt["training"]["amp_skipped_step_count"], 0)
+        self.assertTrue(receipt["configuration"]["deterministic_training"])
 
 
 class FlypSavePathTest(unittest.TestCase):

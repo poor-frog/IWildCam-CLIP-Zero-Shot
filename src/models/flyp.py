@@ -34,6 +34,7 @@ class FlypTrainStats:
     btel_weight: float = 0.0
     btel_prototype_scale: float = 0.0
     lr: float | None = None
+    optimizer_skipped_step_count: int = 0
 
 
 DRM_CHUNK_SIZE = 1_000_000
@@ -202,6 +203,7 @@ def train_flyp_one_epoch(
     total_tail_loss = 0.0
     total_btel_loss = 0.0
     total_seen = 0
+    optimizer_skipped_step_count = 0
     max_batches = args.max_train_batches
     tail_weight = float(getattr(args, "tail_proto_weight", 0.0) or 0.0)
     tail_scale = float(getattr(args, "tail_proto_scale", 50.0))
@@ -306,10 +308,9 @@ def train_flyp_one_epoch(
             scaler.unscale_(optimizer)
         else:
             loss.backward()
-        if scaler is None:
-            for name, param in model.named_parameters():
-                if param.grad is not None and not torch.isfinite(param.grad).all():
-                    raise FloatingPointError(f"FLYP produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
+        for name, param in model.named_parameters():
+            if param.grad is not None and not torch.isfinite(param.grad).all():
+                raise FloatingPointError(f"FLYP produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
         previous_scale = scaler.get_scale() if scaler is not None and hasattr(scaler, "get_scale") else None
         if scaler is not None:
             scaler.step(optimizer)
@@ -319,6 +320,8 @@ def train_flyp_one_epoch(
         else:
             optimizer_step(optimizer, args.device)
             optimizer_was_skipped = False
+        if optimizer_was_skipped:
+            optimizer_skipped_step_count += 1
         if scheduler is not None and not optimizer_was_skipped:
             scheduler.step()
 
@@ -350,6 +353,7 @@ def train_flyp_one_epoch(
         btel_weight=btel_weight,
         btel_prototype_scale=btel_scale if btel_weight != 0.0 else 0.0,
         lr=current_lr,
+        optimizer_skipped_step_count=optimizer_skipped_step_count,
     )
 
 

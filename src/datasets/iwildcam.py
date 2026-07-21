@@ -8,6 +8,8 @@ import wilds
 from wilds.common.data_loaders import get_train_loader, get_eval_loader
 from wilds.datasets.wilds_dataset import WILDSSubset
 
+from src.training_determinism import make_torch_generator, seed_data_loader_worker
+
 
 def get_mask_non_empty(dataset):
     metadf = pd.read_csv(dataset._data_dir / 'metadata.csv')
@@ -144,7 +146,14 @@ class IWildCam:
             self.train_dataset = get_nonempty_subset(self.dataset, 'train', transform=preprocess)
         else:
             self.train_dataset = self.dataset.get_subset('train', transform=preprocess)
-        self.train_loader = get_train_loader("standard", self.train_dataset, num_workers=num_workers, batch_size=batch_size)
+        self.train_loader = get_train_loader(
+            "standard",
+            self.train_dataset,
+            num_workers=num_workers,
+            batch_size=batch_size,
+            generator=make_torch_generator(seed),
+            worker_init_fn=seed_data_loader_worker,
+        )
 
         if remove_non_empty:
             self.test_dataset = get_nonempty_subset(self.dataset, subset, transform=preprocess)
@@ -162,7 +171,9 @@ class IWildCam:
         self.test_loader = get_eval_loader(
             "standard", self.test_dataset,
             num_workers=num_workers,
-            batch_size=batch_size)
+            batch_size=batch_size,
+            generator=make_torch_generator(seed),
+            worker_init_fn=seed_data_loader_worker)
 
         labels_csv = pathlib.Path(__file__).parent / 'iwildcam_metadata' / 'labels.csv'
         df = pd.read_csv(labels_csv)
