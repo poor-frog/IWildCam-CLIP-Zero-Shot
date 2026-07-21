@@ -6,6 +6,7 @@ import os
 import platform
 import random
 import subprocess
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,17 @@ import torch
 
 
 CUBLAS_WORKSPACE_CONFIG = ":4096:8"
+REPRODUCIBILITY_PACKAGES = (
+    "braceexpand",
+    "ftfy",
+    "open-clip-torch",
+    "pandas",
+    "regex",
+    "tqdm",
+    "wandb",
+    "webdataset",
+    "wilds",
+)
 
 
 def seed_data_loader_worker(worker_id: int) -> None:
@@ -62,12 +74,20 @@ def configure_training_determinism(seed: int, *, deterministic: bool) -> dict[st
         for device_index in range(torch.cuda.device_count()):
             gpu_names.append(torch.cuda.get_device_name(device_index))
 
+    package_versions = {}
+    for package_name in REPRODUCIBILITY_PACKAGES:
+        try:
+            package_versions[package_name] = version(package_name)
+        except PackageNotFoundError:
+            package_versions[package_name] = None
+
     return {
         "seed": seed,
         "deterministic_requested": bool(deterministic),
         "python_version": platform.python_version(),
         "numpy_version": np.__version__,
         "torch_version": torch.__version__,
+        "package_versions": package_versions,
         "cuda_available": cuda_available,
         "cuda_version": torch.version.cuda,
         "cudnn_version": torch.backends.cudnn.version(),
@@ -109,6 +129,10 @@ def build_determinism_receipt(
     best_epoch: int | None,
     selected_wise_alpha: float | None,
     amp_skipped_step_count: int,
+    best_validation_score: float | None = None,
+    selected_wise_score: float | None = None,
+    validation_trace: list[dict[str, Any]] | None = None,
+    wise_selection_trace: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     configuration = frozen_argument_payload(args)
     return {
@@ -120,7 +144,11 @@ def build_determinism_receipt(
         "runtime_determinism": runtime_envelope,
         "training": {
             "best_epoch": best_epoch,
+            "best_validation_score": best_validation_score,
             "selected_wise_alpha": selected_wise_alpha,
+            "selected_wise_score": selected_wise_score,
+            "validation_trace": list(validation_trace or []),
+            "wise_selection_trace": list(wise_selection_trace or []),
             "amp_skipped_step_count": int(amp_skipped_step_count),
             "non_finite_loss_or_gradient_observed": False,
         },

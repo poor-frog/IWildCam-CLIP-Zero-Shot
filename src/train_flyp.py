@@ -357,6 +357,9 @@ def main(args):
     best_score = None
     best_epoch = None
     selected_wise_alpha = getattr(args, "wise_eval_alpha", None)
+    selected_wise_score = None
+    validation_trace = []
+    wise_selection_trace = []
     amp_skipped_step_count = 0
     if selected_wise_alpha is not None and not (0.0 <= selected_wise_alpha <= 1.0):
         raise ValueError(f"--wise-eval-alpha must be in [0, 1], got {selected_wise_alpha}")
@@ -411,6 +414,13 @@ def main(args):
             val_top1 = val_results.get("top1")
             val_f1_macro = val_results.get("F1-macro_all")
             val_score = get_validation_score(val_results, args.best_metric)
+            validation_trace.append({
+                "epoch": epoch,
+                "metric_name": args.best_metric,
+                "metric_value": float(val_score),
+                "top1": float(val_top1) if val_top1 is not None else None,
+                "f1_macro_all": float(val_f1_macro) if val_f1_macro is not None else None,
+            })
             print(f"  {args.val_dataset} Top-1 accuracy: {val_top1:.4f}")
             if val_f1_macro is not None:
                 print(f"  {args.val_dataset} F1-macro_all: {val_f1_macro:.4f}")
@@ -454,6 +464,17 @@ def main(args):
             print(f"Validating WiSE-FT alpha={alpha:g} on {args.val_dataset}...")
             wise_results = eval_flyp_single_dataset(model, val_dataset, args)
             wise_score = get_validation_score(wise_results, args.best_metric)
+            wise_selection_trace.append({
+                "alpha": float(alpha),
+                "metric_name": args.best_metric,
+                "metric_value": float(wise_score),
+                "top1": float(wise_results["top1"]) if wise_results.get("top1") is not None else None,
+                "f1_macro_all": (
+                    float(wise_results["F1-macro_all"])
+                    if wise_results.get("F1-macro_all") is not None
+                    else None
+                ),
+            })
             print(f"  WiSE alpha={alpha:g} {args.best_metric}: {wise_score:.4f}")
             if wandb is not None:
                 wandb.log({
@@ -464,6 +485,7 @@ def main(args):
             if wise_best_score is None or wise_score > wise_best_score:
                 wise_best_score = wise_score
                 selected_wise_alpha = alpha
+                selected_wise_score = wise_score
         print(f"Selected WiSE-FT alpha={selected_wise_alpha:g} ({args.best_metric}={wise_best_score:.4f})")
         if wandb is not None:
             wandb.log({"wise/best_alpha": selected_wise_alpha, f"wise/best_{args.best_metric}": wise_best_score})
@@ -501,6 +523,10 @@ def main(args):
             best_epoch=best_epoch,
             selected_wise_alpha=selected_wise_alpha,
             amp_skipped_step_count=amp_skipped_step_count,
+            best_validation_score=float(best_score) if best_score is not None else None,
+            selected_wise_score=float(selected_wise_score) if selected_wise_score is not None else None,
+            validation_trace=validation_trace,
+            wise_selection_trace=wise_selection_trace,
         )
         if paper_grade_mode:
             checkpoint_provenance = build_checkpoint_provenance(paper_grade_paths)

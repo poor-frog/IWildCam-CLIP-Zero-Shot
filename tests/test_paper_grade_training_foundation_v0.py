@@ -127,6 +127,10 @@ def test_determinism_receipt_is_hash_bound_and_immutable(tmp_path):
         best_epoch=9,
         selected_wise_alpha=0.1,
         amp_skipped_step_count=0,
+        best_validation_score=0.42,
+        selected_wise_score=0.43,
+        validation_trace=[{"epoch": 9, "metric_value": 0.42}],
+        wise_selection_trace=[{"alpha": 0.1, "metric_value": 0.43}],
     )
     output = tmp_path / "runtime_determinism_receipt.json"
     write_json_receipt_refusing_overwrite(output, receipt)
@@ -136,6 +140,8 @@ def test_determinism_receipt_is_hash_bound_and_immutable(tmp_path):
         json.dumps(loaded["configuration"], sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     assert loaded["training"]["non_finite_loss_or_gradient_observed"] is False
+    assert loaded["training"]["best_validation_score"] == 0.42
+    assert loaded["training"]["wise_selection_trace"][0]["alpha"] == 0.1
     with pytest.raises(FileExistsError):
         write_json_receipt_refusing_overwrite(output, receipt)
 
@@ -182,6 +188,29 @@ def _paper_grade_args(run_directory, seed=20260721, **overrides):
         "best_checkpoint": str(run_directory / "best_checkpoint.pt"),
         "wandb_run_name": f"pgf-v0-seed-{seed}",
         "model": "ViT-B-16",
+        "template": "iwildcam_template",
+        "epochs": 20,
+        "batch_size": 256,
+        "workers": 4,
+        "lr": 0.00001,
+        "wd": 0.2,
+        "lr_scheduler": "cosine",
+        "warmup_length": 0,
+        "maple_precision": "amp",
+        "best_metric": "F1-macro_all",
+        "drm_weight": 0.0,
+        "drm_warmup_epochs": 0,
+        "tail_proto_weight": 0.0,
+        "btel_weight": 0.0,
+        "wise_alphas": "0,0.05,0.1,0.15,0.2,0.3",
+        "wise_eval_alpha": None,
+        "max_train_batches": None,
+        "max_eval_batches": None,
+        "num_ood_hp_examples": -1,
+        "class_balanced_ood": False,
+        "cd_path": None,
+        "no_load_best_for_eval": False,
+        "btel_audit_only": False,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -213,6 +242,26 @@ def test_validation_run_requires_unique_seed_bound_artifact_paths(tmp_path):
 
     args.eval_datasets = ["IWildCamOOD"]
     with pytest.raises(ValueError, match="blocked eval datasets"):
+        validate_paper_grade_validation_run(args, args.best_checkpoint)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("epochs", 1),
+        ("lr", 9.9),
+        ("maple_precision", "fp32"),
+        ("drm_weight", 1.0),
+        ("wise_alphas", "1.0"),
+        ("max_train_batches", 1),
+    ],
+)
+def test_validation_run_rejects_frozen_configuration_drift(tmp_path, field, value):
+    from src.models.paper_grade_training_foundation import validate_paper_grade_validation_run
+
+    args = _paper_grade_args(tmp_path / "seed-20260721", **{field: value})
+
+    with pytest.raises(ValueError, match=field):
         validate_paper_grade_validation_run(args, args.best_checkpoint)
 
 
@@ -305,8 +354,30 @@ def test_paper_grade_receipt_contains_all_hash_bound_provenance(tmp_path):
     paths.best_checkpoint.write_bytes(b"best")
     paths.final_checkpoint.write_bytes(b"final")
     checkpoint_provenance = build_checkpoint_provenance(paths)
+    validation_trace = [
+        {"epoch": epoch, "metric_value": epoch / 20, "metric_name": "F1-macro_all"}
+        for epoch in range(1, 21)
+    ]
+    wise_alphas = [0.0, 0.05, 0.1, 0.15, 0.2, 0.3]
+    wise_trace = [
+        {"alpha": alpha, "metric_value": index / 10, "metric_name": "F1-macro_all"}
+        for index, alpha in enumerate(wise_alphas)
+    ]
     receipt = enrich_paper_grade_run_receipt(
-        {"status": "complete", "seed": args.seed},
+        {
+            "status": "complete",
+            "seed": args.seed,
+            "training": {
+                "best_epoch": 20,
+                "best_validation_score": 1.0,
+                "selected_wise_alpha": 0.3,
+                "selected_wise_score": 0.5,
+                "validation_trace": validation_trace,
+                "wise_selection_trace": wise_trace,
+                "amp_skipped_step_count": 0,
+                "non_finite_loss_or_gradient_observed": False,
+            },
+        },
         args,
         source_provenance={"git_commit": "abc", "source_tree_sha256": "source-hash"},
         dataset_provenance={"dataset_snapshot_sha256": "dataset-hash"},
@@ -317,4 +388,47 @@ def test_paper_grade_receipt_contains_all_hash_bound_provenance(tmp_path):
     assert receipt["receipt"] == "paper_grade_training_foundation_v0_validation_run"
     assert receipt["provenance"]["checkpoints"]["best_validation"]["sha256"] == hashlib.sha256(b"best").hexdigest()
     assert receipt["provenance"]["checkpoints"]["final_wise"]["sha256"] == hashlib.sha256(b"final").hexdigest()
+    assert receipt["status"] == "complete"
     assert all(receipt["validity"].values())
+
+
+@pytest.mark.parametrize(
+    ("training_override", "failed_gate"),
+    [
+        ({"best_epoch": None}, "selection_complete"),
+        ({"selected_wise_alpha": None}, "selection_complete"),
+        ({"amp_skipped_step_count": 1}, "zero_amp_skipped_steps"),
+        ({"non_finite_loss_or_gradient_observed": True}, "no_non_finite_event"),
+    ],
+)
+def test_paper_grade_receipt_is_invalid_when_training_gate_fails(tmp_path, training_override, failed_gate):
+    from src.models.paper_grade_training_foundation import enrich_paper_grade_run_receipt
+
+    args = _paper_grade_args(tmp_path / "seed-20260721")
+    validation_trace = [{"epoch": epoch, "metric_value": epoch / 20} for epoch in range(1, 21)]
+    wise_alphas = [0.0, 0.05, 0.1, 0.15, 0.2, 0.3]
+    training = {
+        "best_epoch": 20,
+        "best_validation_score": 1.0,
+        "selected_wise_alpha": 0.3,
+        "selected_wise_score": 0.5,
+        "validation_trace": validation_trace,
+        "wise_selection_trace": [
+            {"alpha": alpha, "metric_value": index / 10} for index, alpha in enumerate(wise_alphas)
+        ],
+        "amp_skipped_step_count": 0,
+        "non_finite_loss_or_gradient_observed": False,
+    }
+    training.update(training_override)
+
+    receipt = enrich_paper_grade_run_receipt(
+        {"status": "complete", "seed": args.seed, "training": training},
+        args,
+        source_provenance={"source_tree_sha256": "source"},
+        dataset_provenance={"dataset_snapshot_sha256": "dataset"},
+        checkpoint_provenance={"best_validation": {"sha256": "best"}, "final_wise": {"sha256": "final"}},
+        split_firewall={"passed": True},
+    )
+
+    assert receipt["status"] == "invalid"
+    assert receipt["validity"][failed_gate] is False

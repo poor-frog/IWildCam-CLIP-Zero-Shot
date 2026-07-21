@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,37 @@ COMPLETION_SEEDS = frozenset({20260724, 20260725})
 VALIDATION_SEEDS = PILOT_SEEDS | COMPLETION_SEEDS
 VALIDATION_ALLOWED_DATASETS = frozenset({"IWildCam", "IWildCamVal"})
 VALIDATION_FORBIDDEN_DATASETS = frozenset({"IWildCamIDVal", "IWildCamID", "IWildCamOOD", "CCT-20"})
+FROZEN_WISE_ALPHAS = (0.0, 0.05, 0.1, 0.15, 0.2, 0.3)
+FROZEN_VALIDATION_ARGUMENTS = {
+    "model": "ViT-B-16",
+    "train_dataset": "IWildCam",
+    "val_dataset": "IWildCamVal",
+    "template": "iwildcam_template",
+    "epochs": 20,
+    "batch_size": 256,
+    "workers": 4,
+    "lr": 0.00001,
+    "wd": 0.2,
+    "lr_scheduler": "cosine",
+    "warmup_length": 0,
+    "maple_precision": "amp",
+    "best_metric": "F1-macro_all",
+    "drm_weight": 0.0,
+    "drm_warmup_epochs": 0,
+    "tail_proto_weight": 0.0,
+    "btel_weight": 0.0,
+    "wise_alphas": "0,0.05,0.1,0.15,0.2,0.3",
+    "wise_eval_alpha": None,
+    "load": None,
+    "eval_datasets": None,
+    "max_train_batches": None,
+    "max_eval_batches": None,
+    "num_ood_hp_examples": -1,
+    "class_balanced_ood": False,
+    "cd_path": None,
+    "no_load_best_for_eval": False,
+    "btel_audit_only": False,
+}
 RUN_SPECIFIC_CONFIGURATION_FIELDS = frozenset(
     {
         "best_checkpoint",
@@ -155,6 +187,16 @@ def _require_seed_path(path: Path, seed: int, label: str) -> None:
         raise ValueError(f"{label} must contain seed {seed}: {path}")
 
 
+def validate_frozen_validation_arguments(args: Any) -> None:
+    mismatches = []
+    for field, expected in FROZEN_VALIDATION_ARGUMENTS.items():
+        observed = getattr(args, field, "<missing>")
+        if observed != expected:
+            mismatches.append(f"{field}={observed!r} (expected {expected!r})")
+    if mismatches:
+        raise ValueError("Paper-grade frozen configuration mismatch: " + "; ".join(mismatches))
+
+
 def validate_paper_grade_validation_run(args: Any, best_checkpoint_path: str | Path) -> PaperGradeRunPaths:
     seed = int(args.seed)
     if seed not in VALIDATION_SEEDS:
@@ -172,6 +214,7 @@ def validate_paper_grade_validation_run(args: Any, best_checkpoint_path: str | P
     forbidden_eval = eval_datasets - {"IWildCamVal"}
     if forbidden_eval:
         raise ValueError(f"Paper-grade validation firewall blocked eval datasets: {sorted(forbidden_eval)}")
+    validate_frozen_validation_arguments(args)
 
     receipt_value = getattr(args, "determinism_receipt", None)
     save_value = getattr(args, "save", None)
@@ -236,10 +279,46 @@ def enrich_paper_grade_run_receipt(
         "checkpoints": checkpoint_provenance,
     }
     receipt["split_firewall"] = split_firewall
+    training = receipt.get("training", {})
+    validation_trace = training.get("validation_trace", [])
+    wise_trace = training.get("wise_selection_trace", [])
+    best_epoch = training.get("best_epoch")
+    best_score = training.get("best_validation_score")
+    selected_alpha = training.get("selected_wise_alpha")
+    selected_score = training.get("selected_wise_score")
+    validation_scores = [item.get("metric_value") for item in validation_trace]
+    wise_scores = [item.get("metric_value") for item in wise_trace]
+    finite_validation = len(validation_scores) == 20 and all(
+        isinstance(score, (int, float)) and math.isfinite(score) for score in validation_scores
+    )
+    finite_wise = len(wise_scores) == len(FROZEN_WISE_ALPHAS) and all(
+        isinstance(score, (int, float)) and math.isfinite(score) for score in wise_scores
+    )
+    selection_complete = (
+        isinstance(best_epoch, int)
+        and 1 <= best_epoch <= 20
+        and [item.get("epoch") for item in validation_trace] == list(range(1, 21))
+        and finite_validation
+        and isinstance(best_score, (int, float))
+        and math.isfinite(best_score)
+        and math.isclose(best_score, max(validation_scores))
+        and selected_alpha in FROZEN_WISE_ALPHAS
+        and [item.get("alpha") for item in wise_trace] == list(FROZEN_WISE_ALPHAS)
+        and finite_wise
+        and isinstance(selected_score, (int, float))
+        and math.isfinite(selected_score)
+        and math.isclose(selected_score, max(wise_scores))
+    )
     receipt["validity"] = {
         "checkpoint_hashes_present": all(item.get("sha256") for item in checkpoint_provenance.values()),
         "source_hash_present": bool(source_provenance.get("source_tree_sha256")),
         "dataset_hash_present": bool(dataset_provenance.get("dataset_snapshot_sha256")),
         "split_firewall_passed": split_firewall.get("passed") is True,
+        "frozen_configuration_match": True,
+        "selection_complete": selection_complete,
+        "zero_amp_skipped_steps": training.get("amp_skipped_step_count") == 0,
+        "no_non_finite_event": training.get("non_finite_loss_or_gradient_observed") is False,
     }
+    if not all(receipt["validity"].values()):
+        receipt["status"] = "invalid"
     return receipt
