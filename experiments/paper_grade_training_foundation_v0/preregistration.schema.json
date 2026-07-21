@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Paper-Grade Training Foundation v0 preregistration",
+  "type": "object",
+  "required": [
+    "experiment",
+    "status",
+    "date_locked",
+    "purpose",
+    "predecessor",
+    "claim_boundary",
+    "sources",
+    "frozen_training_configuration",
+    "independent_seed_protocol",
+    "selection_protocol",
+    "frozen_evaluation_heads",
+    "data_firewall",
+    "execution_stages",
+    "metrics_and_statistics",
+    "validity_gate",
+    "reporting"
+  ],
+  "properties": {
+    "experiment": {
+      "const": "Paper-Grade Training Foundation v0"
+    },
+    "status": {
+      "const": "locked_before_implementation_and_execution"
+    },
+    "frozen_training_configuration": {
+      "type": "object",
+      "required": [
+        "model",
+        "pretrained_weights",
+        "initial_checkpoint",
+        "train_dataset",
+        "training_text",
+        "loss",
+        "epochs",
+        "batch_size",
+        "workers",
+        "optimizer",
+        "learning_rate",
+        "weight_decay",
+        "scheduler",
+        "precision",
+        "best_checkpoint_metric",
+        "drm_weight",
+        "tail_proto_weight",
+        "btel_weight",
+        "hyperparameter_search"
+      ],
+      "properties": {
+        "model": {
+          "const": "ViT-B-16"
+        },
+        "pretrained_weights": {
+          "const": "open_clip_laion400m_e31"
+        },
+        "initial_checkpoint": {
+          "type": "null"
+        },
+        "epochs": {
+          "const": 20
+        },
+        "batch_size": {
+          "const": 256
+        },
+        "drm_weight": {
+          "const": 0.0
+        },
+        "tail_proto_weight": {
+          "const": 0.0
+        },
+        "btel_weight": {
+          "const": 0.0
+        },
+        "hyperparameter_search": {
+          "const": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "independent_seed_protocol": {
+      "type": "object",
+      "required": [
+        "pilot_seeds",
+        "completion_seeds",
+        "final_seed_set",
+        "independence_definition",
+        "checkpoint_reuse_across_seeds",
+        "required_seed_controls"
+      ],
+      "properties": {
+        "pilot_seeds": {
+          "const": [
+            20260721,
+            20260722,
+            20260723
+          ]
+        },
+        "completion_seeds": {
+          "const": [
+            20260724,
+            20260725
+          ]
+        },
+        "final_seed_set": {
+          "const": [
+            20260721,
+            20260722,
+            20260723,
+            20260724,
+            20260725
+          ]
+        },
+        "checkpoint_reuse_across_seeds": {
+          "const": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "selection_protocol": {
+      "type": "object",
+      "required": [
+        "selection_split",
+        "selection_metric",
+        "wise_alpha_grid",
+        "forbidden_selection_inputs"
+      ],
+      "properties": {
+        "selection_split": {
+          "const": "IWildCamVal"
+        },
+        "selection_metric": {
+          "const": "F1-macro_all"
+        },
+        "wise_alpha_grid": {
+          "const": [
+            0.0,
+            0.05,
+            0.1,
+            0.15,
+            0.2,
+            0.3
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "data_firewall": {
+      "type": "object",
+      "required": [
+        "pilot_allowed_splits",
+        "pilot_forbidden_splits",
+        "final_evaluation_allowed_only_after",
+        "final_evaluation_splits",
+        "ood_rerun_policy",
+        "cct20_opened"
+      ],
+      "properties": {
+        "pilot_allowed_splits": {
+          "const": [
+            "IWildCam train",
+            "IWildCamVal"
+          ]
+        },
+        "cct20_opened": {
+          "const": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "validity_gate": {
+      "type": "object",
+      "required": [
+        "all_conditions_required",
+        "conditions",
+        "pass_action",
+        "fail_action"
+      ],
+      "properties": {
+        "all_conditions_required": {
+          "const": true
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

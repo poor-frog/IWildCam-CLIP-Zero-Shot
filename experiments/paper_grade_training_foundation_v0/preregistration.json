@@ -1,0 +1,272 @@
+{
+  "experiment": "Paper-Grade Training Foundation v0",
+  "status": "locked_before_implementation_and_execution",
+  "date_locked": "2026-07-21",
+  "purpose": "Establish an independently trained, multi-seed, paper-grade IWildCam foundation before any new method development.",
+  "predecessor": {
+    "audit": "STP Candidate Reliability Audit v0",
+    "closure_commit": "c8c53abf087e1bf701e6dac82d4ea541e91d1967",
+    "closure_receipt_path": "experiments/stp_candidate_reliability_audit_v0/closure_receipt.json",
+    "closure_receipt_sha256": "7ebdd18e2e2c03f5f54cb08e739a7a4f2c87313f2cbda7912cef613d036342d4",
+    "frozen_outcome": "close_all_sequence_inference_development"
+  },
+  "claim_boundary": {
+    "allowed": [
+      "multi-seed characterization of the frozen PoorFrogs label-template FLYP training foundation",
+      "paired per-seed comparison of frozen post-hoc evaluation heads",
+      "baseline variance and reproducibility reporting"
+    ],
+    "forbidden": [
+      "official FLYP reproduction",
+      "official DRM reproduction",
+      "joint DRM and STP training",
+      "new sequence-inference method",
+      "paper-level state of the art",
+      "held-out selection or tuning"
+    ],
+    "terminology": {
+      "training_method": "PoorFrogs label-template FLYP",
+      "drm_weight_nonzero": "L2-to-initialization or L2-SP surrogate; must not be called DRM",
+      "official_drm_checkpoint": "external single-checkpoint eval-only reference"
+    }
+  },
+  "sources": [
+    {
+      "role": "original FLYP implementation",
+      "url": "https://github.com/locuslab/FLYP"
+    },
+    {
+      "role": "official DRM public evaluation release",
+      "url": "https://github.com/vaynexie/DRM"
+    },
+    {
+      "role": "iWildCam benchmark definition",
+      "url": "https://wilds.stanford.edu/datasets/#iwildcam"
+    }
+  ],
+  "frozen_training_configuration": {
+    "model": "ViT-B-16",
+    "pretrained_weights": "open_clip_laion400m_e31",
+    "initial_checkpoint": null,
+    "train_dataset": "IWildCam",
+    "training_text": "deterministic class-label templates from iwildcam_template",
+    "loss": "multi-positive symmetric CLIP contrastive loss",
+    "epochs": 20,
+    "batch_size": 256,
+    "workers": 4,
+    "optimizer": "AdamW",
+    "learning_rate": 0.00001,
+    "weight_decay": 0.2,
+    "scheduler": "cosine",
+    "warmup_steps": 0,
+    "precision": "amp",
+    "best_checkpoint_metric": "IWildCamVal F1-macro_all",
+    "best_checkpoint_tie_break": "earliest epoch",
+    "drm_weight": 0.0,
+    "drm_warmup_epochs": 0,
+    "tail_proto_weight": 0.0,
+    "btel_weight": 0.0,
+    "concept_descriptions_used_during_training": false,
+    "hyperparameter_search": false
+  },
+  "independent_seed_protocol": {
+    "pilot_seeds": [
+      20260721,
+      20260722,
+      20260723
+    ],
+    "completion_seeds": [
+      20260724,
+      20260725
+    ],
+    "final_seed_set": [
+      20260721,
+      20260722,
+      20260723,
+      20260724,
+      20260725
+    ],
+    "independence_definition": "Each seed starts from a freshly initialized open_clip_laion400m_e31 encoder and performs a complete training run.",
+    "checkpoint_reuse_across_seeds": false,
+    "required_seed_controls": [
+      "Python random",
+      "NumPy",
+      "Torch CPU",
+      "Torch CUDA",
+      "DataLoader generator",
+      "DataLoader workers"
+    ],
+    "required_determinism_record": [
+      "torch version",
+      "CUDA version",
+      "cuDNN version",
+      "GPU model",
+      "deterministic-algorithm setting",
+      "CUBLAS workspace setting"
+    ]
+  },
+  "selection_protocol": {
+    "selection_split": "IWildCamVal",
+    "selection_metric": "F1-macro_all",
+    "best_epoch_selected_per_seed": true,
+    "wise_alpha_selected_per_seed": true,
+    "wise_alpha_grid": [
+      0.0,
+      0.05,
+      0.1,
+      0.15,
+      0.2,
+      0.3
+    ],
+    "all_other_hyperparameters_shared_across_seeds": true,
+    "forbidden_selection_inputs": [
+      "IWildCamIDVal",
+      "IWildCamID",
+      "IWildCamOOD",
+      "CCT-20"
+    ]
+  },
+  "frozen_evaluation_heads": [
+    {
+      "name": "label_template_flyp",
+      "configuration": "best validation epoch, WiSE alpha=0"
+    },
+    {
+      "name": "label_template_flyp_wise",
+      "configuration": "best validation epoch, per-seed alpha selected from the frozen grid"
+    },
+    {
+      "name": "label_template_flyp_wise_tpa",
+      "configuration": "prototype_count_per_class=1, prototype_scale=50, sequence_eta=0"
+    },
+    {
+      "name": "label_template_flyp_wise_stp",
+      "configuration": "prototype_count_per_class=1, prototype_scale=50, sequence_eta=0.5, self-inclusive mean"
+    }
+  ],
+  "data_firewall": {
+    "pilot_allowed_splits": [
+      "IWildCam train",
+      "IWildCamVal"
+    ],
+    "pilot_forbidden_splits": [
+      "IWildCamIDVal",
+      "IWildCamID",
+      "IWildCamOOD",
+      "CCT-20"
+    ],
+    "final_evaluation_allowed_only_after": [
+      "all five independent checkpoint receipts are valid",
+      "the five-seed validation manifest is frozen",
+      "all post-hoc head configurations are hash-bound"
+    ],
+    "final_evaluation_splits": [
+      "IWildCamIDVal",
+      "IWildCamID",
+      "IWildCamOOD"
+    ],
+    "ood_rerun_policy": "One final evaluation per valid seed and frozen head. Rerun only for documented infrastructure failure without changing code, checkpoint, or configuration.",
+    "cct20_opened": false
+  },
+  "execution_stages": {
+    "stage_0_implementation_gate": {
+      "action": "Implement and test deterministic seeding, immutable receipts, exact source and dataset provenance, unique seed checkpoint paths, and split-firewall enforcement.",
+      "gpu_training_authorized": false
+    },
+    "stage_1_three_seed_pilot": {
+      "seeds": [
+        20260721,
+        20260722,
+        20260723
+      ],
+      "allowed_outputs": [
+        "training logs",
+        "best checkpoint",
+        "IWildCamVal metrics",
+        "WiSE selection trace",
+        "run receipt"
+      ],
+      "pilot_gate_all_required": [
+        "three runs complete without non-finite loss or gradients",
+        "three unique checkpoint SHA-256 hashes",
+        "identical source commit and dataset provenance",
+        "exactly one best epoch and one selected WiSE alpha per seed",
+        "no forbidden-split predictions materialized"
+      ],
+      "pass_action": "Run the two completion seeds without changing the frozen configuration.",
+      "fail_action": "Repair only the implementation or infrastructure defect and rerun affected pilot seeds; do not tune the method from pilot metrics."
+    },
+    "stage_2_five_seed_completion": {
+      "additional_seeds": [
+        20260724,
+        20260725
+      ],
+      "required_output": "five_seed_validation_manifest.json",
+      "performance_threshold": null,
+      "interpretation": "Variance is an observed property to report, not a gate to tune against."
+    },
+    "stage_3_final_evaluation": {
+      "authorized_only_if_stage_2_complete": true,
+      "configuration_changes_allowed": false,
+      "required_output": "five_seed_final_evaluation.json"
+    }
+  },
+  "metrics_and_statistics": {
+    "primary_metric": "IWildCamOOD F1-macro_all after the firewall opens",
+    "secondary_metrics": [
+      "IWildCamIDVal F1-macro_all",
+      "IWildCamID F1-macro_all",
+      "top-1 accuracy on each final split",
+      "IWildCamVal F1-macro_all",
+      "selected epoch",
+      "selected WiSE alpha"
+    ],
+    "seed_summary": [
+      "arithmetic mean",
+      "sample standard deviation with ddof=1",
+      "median",
+      "minimum",
+      "maximum"
+    ],
+    "paired_head_comparisons": "Compute per-seed metric differences before aggregation.",
+    "confidence_interval": "Two-sided 95% Student-t interval over five independent seed-level values; descriptive because n=5.",
+    "forbidden_statistics": [
+      "treating frames as independent training replicates",
+      "selecting the best seed as the headline result",
+      "dropping a valid seed because of its metric",
+      "combining the single official DRM checkpoint with the five trained seeds"
+    ]
+  },
+  "validity_gate": {
+    "all_conditions_required": true,
+    "conditions": [
+      "five independent runs complete",
+      "five unique checkpoint SHA-256 hashes",
+      "all runs use one hash-bound source commit and dataset snapshot",
+      "all configuration fields match except seed, checkpoint path, and run name",
+      "all selection uses only IWildCamVal",
+      "all final heads use the frozen configurations",
+      "all required receipts and manifests are present",
+      "no valid seed is excluded"
+    ],
+    "pass_action": "Treat the five-seed matrix as the paper-grade training foundation for later method design.",
+    "fail_action": "Do not make multi-seed, robustness, or paper-grade claims. Repair protocol execution without changing frozen method hyperparameters."
+  },
+  "reporting": {
+    "required_artifacts": [
+      "preregistration.json",
+      "preregistration.schema.json",
+      "implementation_receipt.json",
+      "pilot_manifest.json",
+      "five_seed_validation_manifest.json",
+      "five_seed_final_evaluation.json",
+      "closure_receipt.json",
+      "final_assessment.md"
+    ],
+    "checkpoint_sha256_required": true,
+    "source_commit_required": true,
+    "dataset_provenance_required": true,
+    "immutable_run_directories": true,
+    "wandb_is_secondary_evidence_only": true
+  }
+}
