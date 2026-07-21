@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,8 @@ def test_metadata_is_private_gpu_pilot_with_only_iwildcam_attached():
     metadata = json.loads((PACKAGE_ROOT / "kernel-metadata.json").read_text(encoding="utf-8"))
 
     assert metadata["id"] == "klinh1912/poorfrogs-paper-grade-training-foundation-v0"
+    title_slug = re.sub(r"[^a-z0-9]+", "-", metadata["title"].lower()).strip("-")
+    assert title_slug == metadata["id"].split("/", 1)[1]
     assert metadata["is_private"] is True
     assert metadata["enable_gpu"] is True
     assert metadata["enable_internet"] is True
