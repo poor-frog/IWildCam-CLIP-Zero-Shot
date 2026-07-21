@@ -1,0 +1,18 @@
+{
+  "id": "klinh1912/poorfrogs-paper-grade-training-foundation-v0",
+  "title": "PoorFrogs Paper-Grade Training Foundation v0 Pilot",
+  "code_file": "kaggle_main.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": [
+    "thanhquang71/iwildcam-v2-0-2020-wilds-dataset"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}
