@@ -64,6 +64,21 @@ method at `42.42%` OOD F1. The official DRM row uses its own official
 `DRM_eval.py` dual-inference path and selects on `IWildCamIDVal`; it is kept
 as a reference baseline rather than a direct matched comparison.
 
+### STP Candidate Reliability Audit v0
+
+The preregistered development-only candidate-reliability probe is closed. On
+10,654 pooled location-grouped out-of-fold Val-Audit predictions, STP reaches
+`42.86%` macro-F1 and the diagnostic selector reaches `41.78%`, a change of
+`-1.08 pp` with a paired location-bootstrap 95% confidence interval of
+`[-6.64, +1.93] pp`. Tail macro-F1 drops from `27.32%` to `16.54%`, and
+empty/animal errors increase from `169` to `201`.
+
+All folds and negative controls are viable, so the frozen outcome is
+`close_all_sequence_inference_development`, not an inconclusive rerun. This
+audit does not authorize a candidate reranker and does not report Val-Confirm,
+ID, OOD, or CCT-20 performance. Full integrity and gate evidence is recorded
+in `experiments/stp_candidate_reliability_audit_v0/closure_receipt.json`.
+
 ## BTEL v1 negative ablation
 
 `FLYP + BTEL + WiSE` with `btel_weight=0.01`, negative quantile `0.95`, and

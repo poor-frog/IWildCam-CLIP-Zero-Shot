@@ -1,0 +1,89 @@
+{
+  "audit": "STP Candidate Reliability Audit v0",
+  "status": "closed",
+  "closure_date": "2026-07-21",
+  "execution": {
+    "kernel": "klinh1912/poorfrogs-stp-candidate-reliability-audit-v0",
+    "kernel_status": "COMPLETE",
+    "runtime_seconds": 2709,
+    "source_commit": "538203564d77e23d76e68029f5e7c1b1de12fa9b",
+    "foundation": "converted_official_drm_iwildcam_vit_b16",
+    "wise_alpha": 0.2,
+    "prototype_scale": 50.0,
+    "prototype_count_per_class": 1,
+    "stp_eta": 0.5
+  },
+  "integrity": {
+    "all_receipt_bound_artifacts_verified": true,
+    "preregistration_semantically_identical_to_frozen_local_copy": true,
+    "frozen_local_preregistration_sha256": "df6e412459e72372eeb1afc6e52e7f048765b204fe0bc53fcf83285836a59d6f",
+    "artifact_sha256": {
+      "candidate_reliability_audit_v0.json": "55f50fdb1c4096683e7247ce64dfe0df2603aac491f8e39386f5aa9f2cd85cbe",
+      "candidate_reliability_audit_v0.md": "53fb62272f2f88ec9438fb1526afac332282ef38b004af8513c329ee3940f59e",
+      "class_mapping.json": "3191d1df8d98562851a745fdf240610e26f9f1003bcd2da25b2fd9f79dad10f3",
+      "fold_manifest.json": "6231f0969aa69bc195a1d7739d410224ac281cd15d6599e5b5bbf74277a5e920",
+      "preregistration.json": "1092e30b2e03a60b8d5c138eccf7a51171e46962df5d1322c8db87e886196e99"
+    },
+    "class_mapping_sha256": "a30f6b7b0ed95acc580fda161413d0117591ad0a7fcbcd34d04058a138bef2f0",
+    "class_count": 182,
+    "empty_class_index": 0
+  },
+  "audit_population": {
+    "split": "IWildCam Val-Audit",
+    "out_of_fold_prediction_count": 10654,
+    "location_count": 20,
+    "fold_count": 5,
+    "all_folds_viable": true
+  },
+  "results": {
+    "stp_reference": {
+      "macro_f1": 0.42855849862098694,
+      "top1": 0.5873849987983704,
+      "animal_macro_f1": 0.4203324317932129,
+      "tail_macro_f1": 0.27321431040763855,
+      "empty_animal_total_error_count": 169
+    },
+    "diagnostic_selector_oof": {
+      "macro_f1": 0.41775938868522644,
+      "top1": 0.6364745497703552,
+      "animal_macro_f1": 0.41082170605659485,
+      "tail_macro_f1": 0.16538462042808533,
+      "empty_animal_total_error_count": 201,
+      "gain_vs_stp": -0.010799109935760498,
+      "location_bootstrap_95_ci": [
+        -0.06642841547727585,
+        0.01927289180457592
+      ]
+    },
+    "negative_controls": {
+      "all_controls_viable": true,
+      "within_location_sequence_shuffle_count": 20,
+      "within_location_sequence_shuffle_median_gain_vs_stp": -0.07978497445583344,
+      "real_gain_minus_shuffle_median": 0.06898586452007294,
+      "training_target_permutation_count": 20,
+      "training_target_permutation_median_gain_vs_stp": -0.1275537610054016
+    }
+  },
+  "frozen_decision": {
+    "all_conditions_required": true,
+    "conditions": {
+      "macro_f1_gain_at_least_3pp": false,
+      "location_bootstrap_lower_bound_gt_zero": false,
+      "animal_macro_f1_non_regression": false,
+      "tail_macro_f1_within_0p5pp": false,
+      "empty_animal_total_error_non_increase": false,
+      "real_gain_minus_shuffle_median_at_least_1pp": true,
+      "permuted_target_gain_median_at_most_0p5pp": true
+    },
+    "passed": false,
+    "outcome": "close_all_sequence_inference_development",
+    "required_action": "Close candidate reliability and all further sequence-inference method development on this foundation. Do not authorize a candidate-reranker experiment."
+  },
+  "firewall": {
+    "diagnostic_labels_opened_on_val_audit": true,
+    "val_confirm_predictions_materialized": false,
+    "iwildcam_ood_predictions_materialized": false,
+    "cct20_opened": false
+  },
+  "claim_boundary": "Development-only pooled out-of-fold diagnostic. The selector is not a deployable method result and does not establish held-out or OOD generalization."
+}

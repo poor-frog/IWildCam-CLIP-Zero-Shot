@@ -32,5 +32,12 @@ The audit passes only if every promotion condition passes, including at least `+
 | CR-01 | Implement deterministic fold assignment, candidate rows, and diagnostic selector | done | `src/models/stp_candidate_reliability_audit.py` |
 | CR-02 | Add protocol, leakage, control, receipt, and synthetic end-to-end tests | done | `tests/test_stp_candidate_reliability_audit.py` |
 | CR-03a | Add a private Val-Audit-only Kaggle launcher | done | `kaggle-stp-candidate-reliability-audit-v0/` |
-| CR-03b | Execute the frozen Kaggle audit exactly once and archive output | todo | `outputs_log/kaggle-stp-candidate-reliability-audit-v0/` |
-| CR-04 | Verify downloaded hashes and apply the frozen promotion gate | todo | `experiments/stp_candidate_reliability_audit_v0/closure_receipt.json` |
+| CR-03b | Execute the frozen Kaggle audit exactly once and archive output | done | `outputs_log/kaggle-stp-candidate-reliability-audit-v0/` |
+| CR-04 | Verify downloaded hashes and apply the frozen promotion gate | done | `experiments/stp_candidate_reliability_audit_v0/closure_receipt.json` |
+
+## Closed outcome
+
+The frozen audit failed its promotion gate and is closed with outcome
+`close_all_sequence_inference_development`. See [`final_assessment.md`](final_assessment.md)
+and [`closure_receipt.json`](closure_receipt.json). No candidate-reranker experiment
+is authorized, and Val-Confirm, IWildCam OOD, and CCT-20 remain unopened.
