@@ -70,6 +70,11 @@ def parse_arguments():
     parser.add_argument("--runs", type=int, default=1, help="Number of independent runs with different seeds for mean+-std reporting.")
     parser.add_argument("--deterministic-training", action="store_true", help="Enable strict deterministic training controls for paper-grade runs.")
     parser.add_argument("--determinism-receipt", type=str, default=None, help="Immutable JSON receipt path required by --deterministic-training.")
+    parser.add_argument(
+        "--paper-grade-training-foundation-v0",
+        action="store_true",
+        help="Enforce the preregistered five-seed Val-only provenance and split-firewall protocol.",
+    )
     parser.add_argument("--wandb", dest="wandb", action="store_true", help="Enable Weights & Biases logging.")
     parser.add_argument("--no-wandb", dest="wandb", action="store_false", help="Disable Weights & Biases logging when a wrapper enables it by default.")
     parser.set_defaults(wandb=False)

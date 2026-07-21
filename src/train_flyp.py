@@ -14,6 +14,14 @@ from src.models.btel import BurstBatchSampler
 from src.models.btel_artifacts import audit_sequences, build_btel_artifacts, print_sequence_audit, validate_btel_validation_split
 from src.models.coop import maybe_data_parallel, unwrap_model
 from src.models.flyp import eval_flyp_single_dataset, train_flyp_one_epoch, wise_interpolate_state_dict
+from src.models.paper_grade_training_foundation import (
+    ValidationSplitFirewall,
+    build_checkpoint_provenance,
+    build_iwildcam_dataset_provenance,
+    build_source_provenance,
+    enrich_paper_grade_run_receipt,
+    validate_paper_grade_validation_run,
+)
 from src.models.tail_prototype import build_class_prototypes_from_loader
 from src.models.zeroshot import get_zeroshot_classifier
 from src.train_coop import build_eval_dataset, get_validation_score, log_wandb_summary
@@ -292,8 +300,20 @@ def main(args):
     if float(getattr(args, "btel_weight", 0.0) or 0.0) != 0.0:
         validate_btel_validation_split(args.val_dataset)
 
+    best_checkpoint_path = resolve_flyp_best_checkpoint_path(args)
+    paper_grade_mode = bool(getattr(args, "paper_grade_training_foundation_v0", False))
+    paper_grade_paths = None
+    split_firewall = None
+    source_provenance = None
+    if paper_grade_mode:
+        paper_grade_paths = validate_paper_grade_validation_run(args, best_checkpoint_path)
+        split_firewall = ValidationSplitFirewall()
+        source_provenance = build_source_provenance(Path(__file__).resolve().parents[1])
+
     model, zeroshot_state_dict = initialize_flyp_model(args)
     train_dataset_class = getattr(datasets, args.train_dataset)
+    if split_firewall is not None:
+        split_firewall.record(args.train_dataset)
     train_data = train_dataset_class(
         unwrap_model(model).train_preprocess,
         location=args.data_location,
@@ -305,7 +325,12 @@ def main(args):
     wise_alphas = parse_wise_alphas(getattr(args, "wise_alphas", None))
     needs_val_dataset = args.epochs > 0 or bool(wise_alphas) or getattr(args, "btel_audit_only", False)
     if args.val_dataset is not None and needs_val_dataset:
+        if split_firewall is not None:
+            split_firewall.record(args.val_dataset)
         val_dataset = build_eval_dataset(args.val_dataset, unwrap_model(model), args, allow_ood_hp_subsample=True)
+    dataset_provenance = None
+    if paper_grade_mode:
+        dataset_provenance = build_iwildcam_dataset_provenance(train_data.dataset, args.data_location)
     if float(getattr(args, "btel_weight", 0.0) or 0.0) != 0.0 or getattr(args, "btel_audit_only", False):
         print_btel_audits(train_data, val_dataset, args)
     if getattr(args, "btel_audit_only", False):
@@ -331,7 +356,6 @@ def main(args):
     template_fns = getattr(templates, args.template)
     best_score = None
     best_epoch = None
-    best_checkpoint_path = resolve_flyp_best_checkpoint_path(args)
     selected_wise_alpha = getattr(args, "wise_eval_alpha", None)
     amp_skipped_step_count = 0
     if selected_wise_alpha is not None and not (0.0 <= selected_wise_alpha <= 1.0):
@@ -456,6 +480,8 @@ def main(args):
     eval_dataset_names = final_eval_datasets(args)
     if eval_dataset_names:
         for dataset_name in eval_dataset_names:
+            if split_firewall is not None:
+                split_firewall.record(dataset_name)
             print(f"Evaluating FLYP on {dataset_name}...")
             eval_dataset = build_eval_dataset(dataset_name, unwrap_model(model), args)
             results = eval_flyp_single_dataset(model, eval_dataset, args)
@@ -476,6 +502,16 @@ def main(args):
             selected_wise_alpha=selected_wise_alpha,
             amp_skipped_step_count=amp_skipped_step_count,
         )
+        if paper_grade_mode:
+            checkpoint_provenance = build_checkpoint_provenance(paper_grade_paths)
+            receipt = enrich_paper_grade_run_receipt(
+                receipt,
+                args,
+                source_provenance=source_provenance,
+                dataset_provenance=dataset_provenance,
+                checkpoint_provenance=checkpoint_provenance,
+                split_firewall=split_firewall.receipt_payload(),
+            )
         output_path = write_json_receipt_refusing_overwrite(determinism_receipt_path, receipt)
         print(f"Wrote immutable training determinism receipt to {output_path}")
 

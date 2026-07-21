@@ -2,6 +2,7 @@ import hashlib
 import json
 import random
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -166,3 +167,154 @@ def test_iwildcam_loaders_receive_seeded_generators_and_worker_initializer():
     assert eval_kwargs["generator"].initial_seed() == 20260721
     assert train_kwargs["worker_init_fn"] is seed_data_loader_worker
     assert eval_kwargs["worker_init_fn"] is seed_data_loader_worker
+
+
+def _paper_grade_args(run_directory, seed=20260721, **overrides):
+    values = {
+        "seed": seed,
+        "deterministic_training": True,
+        "load": None,
+        "train_dataset": "IWildCam",
+        "val_dataset": "IWildCamVal",
+        "eval_datasets": None,
+        "determinism_receipt": str(run_directory / "run_receipt.json"),
+        "save": str(run_directory / "final_checkpoint.pt"),
+        "best_checkpoint": str(run_directory / "best_checkpoint.pt"),
+        "wandb_run_name": f"pgf-v0-seed-{seed}",
+        "model": "ViT-B-16",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_validation_split_firewall_blocks_before_recording_forbidden_split():
+    from src.models.paper_grade_training_foundation import ValidationSplitFirewall
+
+    firewall = ValidationSplitFirewall()
+    firewall.record("IWildCam")
+    firewall.record("IWildCamVal")
+
+    with pytest.raises(ValueError, match="firewall blocked"):
+        firewall.record("IWildCamOOD")
+
+    assert firewall.receipt_payload()["accessed_datasets"] == ["IWildCam", "IWildCamVal"]
+    assert firewall.receipt_payload()["passed"] is True
+
+
+def test_validation_run_requires_unique_seed_bound_artifact_paths(tmp_path):
+    from src.models.paper_grade_training_foundation import validate_paper_grade_validation_run
+
+    run_directory = tmp_path / "seed-20260721"
+    args = _paper_grade_args(run_directory)
+    paths = validate_paper_grade_validation_run(args, args.best_checkpoint)
+
+    assert paths.run_directory == run_directory.resolve()
+    assert paths.receipt.name == "run_receipt.json"
+
+    args.eval_datasets = ["IWildCamOOD"]
+    with pytest.raises(ValueError, match="blocked eval datasets"):
+        validate_paper_grade_validation_run(args, args.best_checkpoint)
+
+
+def test_validation_run_refuses_existing_checkpoint(tmp_path):
+    from src.models.paper_grade_training_foundation import validate_paper_grade_validation_run
+
+    run_directory = tmp_path / "seed-20260721"
+    run_directory.mkdir()
+    args = _paper_grade_args(run_directory)
+    Path(args.save).write_bytes(b"existing")
+
+    with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+        validate_paper_grade_validation_run(args, args.best_checkpoint)
+
+
+def test_validation_run_refuses_nonempty_seed_directory(tmp_path):
+    from src.models.paper_grade_training_foundation import validate_paper_grade_validation_run
+
+    run_directory = tmp_path / "seed-20260721"
+    run_directory.mkdir()
+    (run_directory / "stale.log").write_text("old run", encoding="utf-8")
+    args = _paper_grade_args(run_directory)
+
+    with pytest.raises(FileExistsError, match="run directory is not empty"):
+        validate_paper_grade_validation_run(args, args.best_checkpoint)
+
+
+def test_protocol_configuration_hash_ignores_only_preregistered_run_fields(tmp_path):
+    from src.models.paper_grade_training_foundation import protocol_configuration
+    from src.training_determinism import sha256_json
+
+    first = _paper_grade_args(tmp_path / "seed-20260721", seed=20260721)
+    second = _paper_grade_args(tmp_path / "seed-20260722", seed=20260722)
+
+    assert sha256_json(protocol_configuration(first)) == sha256_json(protocol_configuration(second))
+    second.model = "ViT-L-14"
+    assert sha256_json(protocol_configuration(first)) != sha256_json(protocol_configuration(second))
+
+
+def test_source_provenance_hash_changes_with_source_content(tmp_path):
+    from src.models.paper_grade_training_foundation import build_source_provenance
+
+    (tmp_path / "src").mkdir()
+    source = tmp_path / "src" / "example.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    first = build_source_provenance(tmp_path)
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    second = build_source_provenance(tmp_path)
+
+    assert first["hashed_file_count"] == 1
+    assert first["source_tree_sha256"] != second["source_tree_sha256"]
+
+
+def test_dataset_provenance_binds_metadata_labels_and_splits(tmp_path):
+    from src.models.paper_grade_training_foundation import build_iwildcam_dataset_provenance
+
+    data_dir = tmp_path / "iwildcam_v2.0"
+    data_dir.mkdir()
+    (data_dir / "metadata.csv").write_text("image_id,y\n1,0\n2,1\n", encoding="utf-8")
+    dataset = SimpleNamespace(
+        _data_dir=data_dir,
+        version="2.0",
+        n_classes=2,
+        split_dict={"train": 0, "val": 1},
+        split_array=np.array([0, 1], dtype=np.int64),
+        y_array=torch.tensor([0, 1]),
+    )
+
+    provenance = build_iwildcam_dataset_provenance(dataset, tmp_path)
+
+    assert provenance["metadata_csv"]["sha256"] == hashlib.sha256(
+        (data_dir / "metadata.csv").read_bytes()
+    ).hexdigest()
+    assert provenance["split_array"]["sha256"]
+    assert provenance["label_array"]["sha256"]
+    assert provenance["dataset_snapshot_sha256"]
+
+
+def test_paper_grade_receipt_contains_all_hash_bound_provenance(tmp_path):
+    from src.models.paper_grade_training_foundation import (
+        build_checkpoint_provenance,
+        enrich_paper_grade_run_receipt,
+        validate_paper_grade_validation_run,
+    )
+
+    run_directory = tmp_path / "seed-20260721"
+    run_directory.mkdir()
+    args = _paper_grade_args(run_directory)
+    paths = validate_paper_grade_validation_run(args, args.best_checkpoint)
+    paths.best_checkpoint.write_bytes(b"best")
+    paths.final_checkpoint.write_bytes(b"final")
+    checkpoint_provenance = build_checkpoint_provenance(paths)
+    receipt = enrich_paper_grade_run_receipt(
+        {"status": "complete", "seed": args.seed},
+        args,
+        source_provenance={"git_commit": "abc", "source_tree_sha256": "source-hash"},
+        dataset_provenance={"dataset_snapshot_sha256": "dataset-hash"},
+        checkpoint_provenance=checkpoint_provenance,
+        split_firewall={"passed": True, "accessed_datasets": ["IWildCam", "IWildCamVal"]},
+    )
+
+    assert receipt["receipt"] == "paper_grade_training_foundation_v0_validation_run"
+    assert receipt["provenance"]["checkpoints"]["best_validation"]["sha256"] == hashlib.sha256(b"best").hexdigest()
+    assert receipt["provenance"]["checkpoints"]["final_wise"]["sha256"] == hashlib.sha256(b"final").hexdigest()
+    assert all(receipt["validity"].values())
