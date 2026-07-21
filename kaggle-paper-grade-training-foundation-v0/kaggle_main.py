@@ -7,10 +7,23 @@ from pathlib import Path
 
 
 GITHUB_REPOSITORY = "https://github.com/poor-frog/IWildCam-CLIP-Zero-Shot.git"
-SOURCE_COMMIT = "4246a27c13db27b832a7441b9ae31a880bcdd8f6"
+SOURCE_COMMIT = "cbf204d36eb4f19df6867705fd784785ca8b1be0"
 WORKING_REPOSITORY = Path("/kaggle/working/pgf-v0-source")
 OUTPUT_ROOT = Path("/kaggle/working/paper-grade-training-foundation-v0-pilot")
 PILOT_SEEDS = (20260721, 20260722, 20260723)
+FROZEN_WISE_ALPHAS = (0.0, 0.05, 0.1, 0.15, 0.2, 0.3)
+PINNED_DEPENDENCIES = (
+    "braceexpand==0.1.7",
+    "ftfy==6.3.1",
+    "open-clip-torch==3.3.0",
+    "pandas==2.2.3",
+    "regex==2024.11.6",
+    "tqdm==4.67.3",
+    "wandb==0.28.0",
+    "webdataset==1.0.2",
+    "wilds==2.0.0",
+)
+EXPECTED_PACKAGE_VERSIONS = dict(dependency.split("==", 1) for dependency in PINNED_DEPENDENCIES)
 WANDB_SECRET_NAMES = ("WANDB_API_KEY", "wandb-api-key", "wandb_api_key", "WANDB-API-KEY")
 
 
@@ -35,24 +48,7 @@ def clone_frozen_repository():
 
 
 def ensure_dependencies():
-    run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "-q",
-            "braceexpand",
-            "ftfy",
-            "open-clip-torch",
-            "pandas",
-            "regex",
-            "tqdm",
-            "wandb",
-            "webdataset",
-            "wilds",
-        ]
-    )
+    run([sys.executable, "-m", "pip", "install", "-q", *PINNED_DEPENDENCIES])
     run([sys.executable, "-m", "pip", "install", "-q", "-e", str(WORKING_REPOSITORY), "--no-deps"])
 
 
@@ -176,6 +172,11 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+def sha256_json(payload):
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def verify_seed_receipt(seed):
     receipt_path = seed_run_directory(seed) / "run_receipt.json"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -187,9 +188,31 @@ def verify_seed_receipt(seed):
         raise RuntimeError(f"Seed {seed} accessed data outside train plus IWildCamVal.")
     if not all(receipt.get("validity", {}).values()):
         raise RuntimeError(f"Seed {seed} receipt failed its provenance or firewall validity checks.")
+    training = receipt.get("training", {})
+    if training.get("amp_skipped_step_count") != 0:
+        raise RuntimeError(f"Seed {seed} had skipped AMP optimizer steps.")
+    if training.get("non_finite_loss_or_gradient_observed") is not False:
+        raise RuntimeError(f"Seed {seed} recorded a non-finite loss or gradient event.")
+    if not isinstance(training.get("best_epoch"), int) or not 1 <= training["best_epoch"] <= 20:
+        raise RuntimeError(f"Seed {seed} does not have exactly one valid best epoch.")
+    if training.get("selected_wise_alpha") not in FROZEN_WISE_ALPHAS:
+        raise RuntimeError(f"Seed {seed} does not have one alpha from the frozen WiSE grid.")
+    validation_trace = training.get("validation_trace", [])
+    wise_trace = training.get("wise_selection_trace", [])
+    if [item.get("epoch") for item in validation_trace] != list(range(1, 21)):
+        raise RuntimeError(f"Seed {seed} validation trace does not cover all 20 epochs.")
+    if [item.get("alpha") for item in wise_trace] != list(FROZEN_WISE_ALPHAS):
+        raise RuntimeError(f"Seed {seed} WiSE trace does not match the frozen grid.")
+    runtime = receipt.get("runtime_determinism", {})
+    package_versions = runtime.get("package_versions", {})
+    if package_versions != EXPECTED_PACKAGE_VERSIONS:
+        raise RuntimeError(
+            f"Seed {seed} package versions differ from the pinned environment: {package_versions}"
+        )
     for artifact in receipt["provenance"]["checkpoints"].values():
         if sha256_file(artifact["path"]) != artifact["sha256"]:
             raise RuntimeError(f"Seed {seed} checkpoint hash mismatch: {artifact['path']}")
+    runtime_environment = {key: value for key, value in runtime.items() if key not in {"seed", "source_commit"}}
     return {
         "seed": seed,
         "receipt_path": str(receipt_path),
@@ -197,10 +220,17 @@ def verify_seed_receipt(seed):
         "source_tree_sha256": receipt["provenance"]["source"]["source_tree_sha256"],
         "dataset_snapshot_sha256": receipt["provenance"]["dataset"]["dataset_snapshot_sha256"],
         "protocol_configuration_sha256": receipt["protocol_configuration_sha256"],
+        "runtime_environment_sha256": sha256_json(runtime_environment),
         "best_checkpoint_sha256": receipt["provenance"]["checkpoints"]["best_validation"]["sha256"],
         "final_checkpoint_sha256": receipt["provenance"]["checkpoints"]["final_wise"]["sha256"],
         "best_epoch": receipt["training"]["best_epoch"],
+        "best_validation_score": receipt["training"]["best_validation_score"],
         "selected_wise_alpha": receipt["training"]["selected_wise_alpha"],
+        "selected_wise_score": receipt["training"]["selected_wise_score"],
+        "amp_skipped_step_count": receipt["training"]["amp_skipped_step_count"],
+        "non_finite_loss_or_gradient_observed": receipt["training"]["non_finite_loss_or_gradient_observed"],
+        "validation_trace_sha256": sha256_json(validation_trace),
+        "wise_selection_trace_sha256": sha256_json(wise_trace),
     }
 
 
@@ -211,6 +241,7 @@ def build_pilot_manifest(seed_receipts):
         "source_tree_sha256",
         "dataset_snapshot_sha256",
         "protocol_configuration_sha256",
+        "runtime_environment_sha256",
     )
     for field in singleton_fields:
         if len({item[field] for item in seed_receipts}) != 1:
@@ -218,6 +249,15 @@ def build_pilot_manifest(seed_receipts):
     for field in ("best_checkpoint_sha256", "final_checkpoint_sha256"):
         if len({item[field] for item in seed_receipts}) != len(PILOT_SEEDS):
             raise RuntimeError(f"Pilot seed checkpoints are not unique for {field}.")
+    for item in seed_receipts:
+        if not isinstance(item.get("best_epoch"), int) or not 1 <= item["best_epoch"] <= 20:
+            raise RuntimeError(f"Pilot seed {item.get('seed')} has no valid best epoch.")
+        if item.get("selected_wise_alpha") not in FROZEN_WISE_ALPHAS:
+            raise RuntimeError(f"Pilot seed {item.get('seed')} has no selected frozen WiSE alpha.")
+        if item.get("amp_skipped_step_count") != 0:
+            raise RuntimeError(f"Pilot seed {item.get('seed')} had skipped AMP optimizer steps.")
+        if item.get("non_finite_loss_or_gradient_observed") is not False:
+            raise RuntimeError(f"Pilot seed {item.get('seed')} recorded a non-finite event.")
     return {
         "manifest": "paper_grade_training_foundation_v0_three_seed_pilot",
         "status": "complete",

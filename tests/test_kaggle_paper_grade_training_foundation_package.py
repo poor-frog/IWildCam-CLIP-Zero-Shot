@@ -6,7 +6,7 @@ import pytest
 
 
 PACKAGE_ROOT = Path(__file__).parents[1] / "kaggle-paper-grade-training-foundation-v0"
-SOURCE_COMMIT = "4246a27c13db27b832a7441b9ae31a880bcdd8f6"
+SOURCE_COMMIT = "cbf204d36eb4f19df6867705fd784785ca8b1be0"
 
 
 def load_launcher():
@@ -28,12 +28,21 @@ def test_metadata_is_private_gpu_pilot_with_only_iwildcam_attached():
     assert metadata["model_sources"] == []
 
 
-def test_launcher_pins_pgf02_commit_and_three_preregistered_seeds():
+def test_launcher_pins_validated_source_commit_and_three_preregistered_seeds():
     launcher = load_launcher()
 
     assert launcher.SOURCE_COMMIT == SOURCE_COMMIT
     assert launcher.PILOT_SEEDS == (20260721, 20260722, 20260723)
     assert "pull" not in (PACKAGE_ROOT / "kaggle_main.py").read_text(encoding="utf-8")
+
+
+def test_launcher_pins_every_installed_dependency():
+    launcher = load_launcher()
+
+    assert launcher.PINNED_DEPENDENCIES
+    assert all("==" in dependency for dependency in launcher.PINNED_DEPENDENCIES)
+    assert launcher.EXPECTED_PACKAGE_VERSIONS["open-clip-torch"] == "3.3.0"
+    assert launcher.EXPECTED_PACKAGE_VERSIONS["wilds"] == "2.0.0"
 
 
 def test_commands_lock_frozen_training_configuration_and_unique_paths():
@@ -86,10 +95,17 @@ def _seed_receipt(seed, suffix):
         "source_tree_sha256": "one-source",
         "dataset_snapshot_sha256": "one-dataset",
         "protocol_configuration_sha256": "one-config",
+        "runtime_environment_sha256": "one-environment",
         "best_checkpoint_sha256": f"best-{suffix}",
         "final_checkpoint_sha256": f"final-{suffix}",
         "best_epoch": 10,
+        "best_validation_score": 0.4,
         "selected_wise_alpha": 0.1,
+        "selected_wise_score": 0.41,
+        "amp_skipped_step_count": 0,
+        "non_finite_loss_or_gradient_observed": False,
+        "validation_trace_sha256": f"validation-{suffix}",
+        "wise_selection_trace_sha256": f"wise-{suffix}",
     }
 
 
@@ -106,6 +122,24 @@ def test_pilot_manifest_requires_shared_provenance_and_unique_checkpoints():
 
     receipts[1]["dataset_snapshot_sha256"] = "different-dataset"
     with pytest.raises(RuntimeError, match="dataset_snapshot_sha256"):
+        launcher.build_pilot_manifest(receipts)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("best_epoch", None, "best epoch"),
+        ("selected_wise_alpha", None, "WiSE alpha"),
+        ("amp_skipped_step_count", 1, "skipped AMP"),
+        ("non_finite_loss_or_gradient_observed", True, "non-finite"),
+    ],
+)
+def test_pilot_manifest_rejects_failed_training_gate(field, value, message):
+    launcher = load_launcher()
+    receipts = [_seed_receipt(seed, index) for index, seed in enumerate(launcher.PILOT_SEEDS)]
+    receipts[0][field] = value
+
+    with pytest.raises(RuntimeError, match=message):
         launcher.build_pilot_manifest(receipts)
 
 
