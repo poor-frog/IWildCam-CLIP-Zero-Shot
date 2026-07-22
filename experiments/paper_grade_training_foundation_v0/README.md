@@ -23,7 +23,7 @@ Official DRM remains a separate single-checkpoint eval-only reference. STP remai
 | PGF-02 | Implement immutable per-seed receipts, provenance binding, and split-firewall enforcement | done | `src/models/paper_grade_training_foundation.py` |
 | PGF-03 | Add a private three-seed pilot Kaggle launcher with unique checkpoint paths | done | `kaggle-paper-grade-training-foundation-v0/` |
 | PGF-04 | Run local synthetic and package smoke tests without opening final splits | done | `tests/test_paper_grade_training_foundation_v0.py` |
-| PGF-05 | Execute and verify the three-seed Val-only pilot | todo | `outputs_log/kaggle-paper-grade-training-foundation-v0-pilot/` |
+| PGF-05 | Execute and verify the three-seed Val-only pilot | in_progress | `outputs_log/kaggle-paper-grade-training-foundation-v0-pilot/` |
 | PGF-06 | Execute the two frozen completion seeds and freeze the validation manifest | blocked | `experiments/paper_grade_training_foundation_v0/five_seed_validation_manifest.json` |
 | PGF-07 | Run the one-shot five-seed final evaluation after PGF-06 | blocked | `experiments/paper_grade_training_foundation_v0/five_seed_final_evaluation.json` |
 | PGF-08 | Apply the validity gate and write the final assessment | blocked | `experiments/paper_grade_training_foundation_v0/closure_receipt.json` |

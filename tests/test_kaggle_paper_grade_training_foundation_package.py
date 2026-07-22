@@ -7,7 +7,7 @@ import pytest
 
 
 PACKAGE_ROOT = Path(__file__).parents[1] / "kaggle-paper-grade-training-foundation-v0"
-SOURCE_COMMIT = "cbf204d36eb4f19df6867705fd784785ca8b1be0"
+SOURCE_COMMIT = "ebbd66c6824135b1fa22d76995ecf512bb0cd2bb"
 
 
 def load_launcher():
@@ -46,6 +46,21 @@ def test_launcher_pins_every_installed_dependency():
     assert all("==" in dependency for dependency in launcher.PINNED_DEPENDENCIES)
     assert launcher.EXPECTED_PACKAGE_VERSIONS["open-clip-torch"] == "3.3.0"
     assert launcher.EXPECTED_PACKAGE_VERSIONS["wilds"] == "2.0.0"
+
+
+def test_launcher_requires_repaired_static_unit_amp_policy():
+    launcher = load_launcher()
+
+    assert launcher.EXPECTED_AMP_POLICY == {
+        "autocast_enabled": True,
+        "grad_scaler_enabled": True,
+        "grad_scaler_initial_scale": 1.0,
+        "grad_scaler_growth_interval": 2**31 - 1,
+        "paper_grade_static_unit_scale": True,
+    }
+    assert "PAPER_GRADE_AMP_INIT_SCALE = 1.0" in (
+        Path(__file__).parents[1] / "src" / "train_flyp.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_commands_lock_frozen_training_configuration_and_unique_paths():

@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 GITHUB_REPOSITORY = "https://github.com/poor-frog/IWildCam-CLIP-Zero-Shot.git"
-SOURCE_COMMIT = "cbf204d36eb4f19df6867705fd784785ca8b1be0"
+SOURCE_COMMIT = "ebbd66c6824135b1fa22d76995ecf512bb0cd2bb"
 WORKING_REPOSITORY = Path("/kaggle/working/pgf-v0-source")
 OUTPUT_ROOT = Path("/kaggle/working/paper-grade-training-foundation-v0-pilot")
 PILOT_SEEDS = (20260721, 20260722, 20260723)
@@ -24,6 +24,13 @@ PINNED_DEPENDENCIES = (
     "wilds==2.0.0",
 )
 EXPECTED_PACKAGE_VERSIONS = dict(dependency.split("==", 1) for dependency in PINNED_DEPENDENCIES)
+EXPECTED_AMP_POLICY = {
+    "autocast_enabled": True,
+    "grad_scaler_enabled": True,
+    "grad_scaler_initial_scale": 1.0,
+    "grad_scaler_growth_interval": 2**31 - 1,
+    "paper_grade_static_unit_scale": True,
+}
 WANDB_SECRET_NAMES = ("WANDB_API_KEY", "wandb-api-key", "wandb_api_key", "WANDB-API-KEY")
 
 
@@ -54,15 +61,21 @@ def ensure_dependencies():
 
 def ensure_frozen_source_support():
     required = {
-        WORKING_REPOSITORY / "src" / "train_flyp.py": "paper_grade_training_foundation_v0",
-        WORKING_REPOSITORY / "src" / "models" / "paper_grade_training_foundation.py": "ValidationSplitFirewall",
-        WORKING_REPOSITORY / "experiments" / "paper_grade_training_foundation_v0" / "preregistration.json": SOURCE_COMMIT,
+        WORKING_REPOSITORY / "src" / "train_flyp.py": (
+            "paper_grade_training_foundation_v0",
+            "PAPER_GRADE_AMP_INIT_SCALE = 1.0",
+        ),
+        WORKING_REPOSITORY / "src" / "models" / "paper_grade_training_foundation.py": (
+            "ValidationSplitFirewall",
+        ),
     }
-    for path, marker in required.items():
+    for path, markers in required.items():
         if not path.is_file():
             raise RuntimeError(f"Frozen source checkout is missing {path.relative_to(WORKING_REPOSITORY)}")
-        if path.suffix == ".py" and marker not in path.read_text(encoding="utf-8"):
-            raise RuntimeError(f"Frozen source checkout lacks PGF-02 marker {marker!r} in {path.name}")
+        source = path.read_text(encoding="utf-8")
+        for marker in markers:
+            if marker not in source:
+                raise RuntimeError(f"Frozen source checkout lacks required marker {marker!r} in {path.name}")
 
 
 def find_iwildcam_source_root():
@@ -209,6 +222,8 @@ def verify_seed_receipt(seed):
         raise RuntimeError(
             f"Seed {seed} package versions differ from the pinned environment: {package_versions}"
         )
+    if runtime.get("amp_policy") != EXPECTED_AMP_POLICY:
+        raise RuntimeError(f"Seed {seed} did not use the frozen paper-grade AMP policy.")
     for artifact in receipt["provenance"]["checkpoints"].values():
         if sha256_file(artifact["path"]) != artifact["sha256"]:
             raise RuntimeError(f"Seed {seed} checkpoint hash mismatch: {artifact['path']}")
