@@ -41,6 +41,18 @@ DRM_CHUNK_SIZE = 1_000_000
 DRM_EXCLUDED_PARAMETER_NAMES = frozenset({"logit_scale"})
 
 
+def _tensor_diagnostic(name, tensor):
+    value = tensor.detach()
+    finite = torch.isfinite(value)
+    finite_values = value[finite].float()
+    finite_abs_max = finite_values.abs().max().item() if finite_values.numel() else None
+    return (
+        f"{name}_dtype={value.dtype},"
+        f"{name}_nonfinite={value.numel() - finite.sum().item()}/{value.numel()},"
+        f"{name}_finite_abs_max={finite_abs_max}"
+    )
+
+
 def build_flyp_captions(labels, classnames, templates, offset=0):
     captions = []
     template_count = len(templates)
@@ -310,7 +322,22 @@ def train_flyp_one_epoch(
             loss.backward()
         for name, param in model.named_parameters():
             if param.grad is not None and not torch.isfinite(param.grad).all():
-                raise FloatingPointError(f"FLYP produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}")
+                scaler_scale = scaler.get_scale() if scaler is not None and hasattr(scaler, "get_scale") else None
+                diagnostics = "; ".join(
+                    [
+                        f"loss={loss.detach().float().item()}",
+                        f"clip_loss={clip_loss.detach().float().item()}",
+                        f"amp_scale={scaler_scale}",
+                        _tensor_diagnostic("image_features", image_features),
+                        _tensor_diagnostic("text_features", text_features),
+                        _tensor_diagnostic("logit_scale", logit_scale),
+                        _tensor_diagnostic("gradient", param.grad),
+                    ]
+                )
+                raise FloatingPointError(
+                    f"FLYP produced non-finite gradient for {name} at epoch {epoch}, batch {batch_index}; "
+                    f"{diagnostics}"
+                )
         previous_scale = scaler.get_scale() if scaler is not None and hasattr(scaler, "get_scale") else None
         if scaler is not None:
             scaler.step(optimizer)

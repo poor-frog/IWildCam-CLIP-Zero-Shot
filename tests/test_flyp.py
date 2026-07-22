@@ -976,13 +976,19 @@ class FlypDrmTest(unittest.TestCase):
             def unscale_(self, optimizer):
                 pass
 
+            def get_scale(self):
+                return 65536.0
+
         model = TinyModel()
         batch = {"images": torch.eye(2), "labels": torch.tensor([0, 1])}
         args = SimpleNamespace(device="cpu", model="ViT-B-16", max_train_batches=1, use_amp=True)
         optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 
         with patch("src.models.flyp.open_clip.get_tokenizer", return_value=TinyTokenizer()):
-            with self.assertRaisesRegex(FloatingPointError, "non-finite gradient"):
+            with self.assertRaisesRegex(
+                FloatingPointError,
+                r"non-finite gradient.*amp_scale=65536\.0.*gradient_nonfinite=4/4",
+            ):
                 train_flyp_one_epoch(
                     model,
                     [batch],
@@ -1318,6 +1324,25 @@ class FlypMainAmpTest(unittest.TestCase):
         self.assertTrue(args.use_amp)
         self.assertIsNotNone(captured["scaler"])
         self.assertEqual(captured["dataset_seed"], 0)
+
+    def test_paper_grade_amp_uses_static_unit_loss_scale(self):
+        import src.train_flyp as train_flyp
+
+        args = SimpleNamespace(device="cuda", maple_precision="amp", paper_grade_training_foundation_v0=True)
+        with patch("src.train_flyp.torch.cuda.is_available", return_value=True):
+            scaler = train_flyp.build_flyp_grad_scaler(args, use_amp=True)
+
+        self.assertEqual(scaler.get_scale(), 1.0)
+        self.assertEqual(train_flyp.PAPER_GRADE_AMP_GROWTH_INTERVAL, 2**31 - 1)
+
+    def test_regular_amp_keeps_default_dynamic_loss_scale(self):
+        import src.train_flyp as train_flyp
+
+        args = SimpleNamespace(device="cuda", maple_precision="amp", paper_grade_training_foundation_v0=False)
+        with patch("src.train_flyp.torch.cuda.is_available", return_value=True):
+            scaler = train_flyp.build_flyp_grad_scaler(args, use_amp=True)
+
+        self.assertEqual(scaler.get_scale(), 65536.0)
 
     def test_main_disables_grad_scaler_when_fp32_precision_requested(self):
         args, captured = self._run_main_with_precision("fp32")

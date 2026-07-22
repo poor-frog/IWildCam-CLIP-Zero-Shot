@@ -36,6 +36,8 @@ from src.training_determinism import (
 
 
 OPEN_CLIP_FLYP_MODELS = {"ViT-B-16", "ViT-L-14"}
+PAPER_GRADE_AMP_INIT_SCALE = 1.0
+PAPER_GRADE_AMP_GROWTH_INTERVAL = 2**31 - 1
 
 
 def resolve_flyp_save_path(save_path):
@@ -115,6 +117,19 @@ def load_wise_interpolated_state(model, finetuned_state_dict, zeroshot_state_dic
 
 def should_use_flyp_amp(args):
     return str(args.device).startswith("cuda") and getattr(args, "maple_precision", "fp32") == "amp"
+
+
+def build_flyp_grad_scaler(args, use_amp):
+    if not use_amp:
+        return None
+    if getattr(args, "paper_grade_training_foundation_v0", False):
+        return torch.amp.GradScaler(
+            "cuda",
+            init_scale=PAPER_GRADE_AMP_INIT_SCALE,
+            growth_interval=PAPER_GRADE_AMP_GROWTH_INTERVAL,
+            enabled=True,
+        )
+    return torch.amp.GradScaler("cuda", enabled=True)
 
 
 def maybe_build_tail_teacher_model(args):
@@ -350,7 +365,16 @@ def main(args):
     scheduler = build_step_lr_scheduler(optimizer, args, total_steps)
     use_amp = should_use_flyp_amp(args)
     args.use_amp = use_amp
-    scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_amp else None
+    scaler = build_flyp_grad_scaler(args, use_amp)
+    runtime_determinism["amp_policy"] = {
+        "autocast_enabled": use_amp,
+        "grad_scaler_enabled": scaler is not None,
+        "grad_scaler_initial_scale": float(scaler.get_scale()) if scaler is not None else None,
+        "grad_scaler_growth_interval": (
+            PAPER_GRADE_AMP_GROWTH_INTERVAL if paper_grade_mode and scaler is not None else None
+        ),
+        "paper_grade_static_unit_scale": bool(paper_grade_mode and scaler is not None),
+    }
     args.training_method = "flyp"
     wandb = init_wandb(args)
     template_fns = getattr(templates, args.template)
