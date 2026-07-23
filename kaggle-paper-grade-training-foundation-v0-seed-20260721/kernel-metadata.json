@@ -1,0 +1,16 @@
+{
+  "id": "klinh1912/poorfrogs-pgf-v0-seed-20260721",
+  "title": "PoorFrogs PGF v0 Seed 20260721",
+  "code_file": "kaggle_main.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "thanhquang71/iwildcam-v2-0-2020-wilds-dataset"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

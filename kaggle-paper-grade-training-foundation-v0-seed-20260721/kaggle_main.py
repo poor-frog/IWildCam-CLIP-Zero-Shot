@@ -1,0 +1,37 @@
+import subprocess
+import sys
+from pathlib import Path
+
+
+GITHUB_REPOSITORY = "https://github.com/poor-frog/IWildCam-CLIP-Zero-Shot.git"
+SOURCE_COMMIT = "a97bfa5af010096701fe43a08e0f24678123353b"
+TARGET_SEED = 20260721
+WORKING_REPOSITORY = Path("/kaggle/working/pgf-v0-source")
+OUTPUT_ROOT = Path(f"/kaggle/working/paper-grade-training-foundation-v0-seed-{TARGET_SEED}")
+
+
+def run(command):
+    printable = [str(part) for part in command]
+    print("+", " ".join(printable), flush=True)
+    subprocess.check_call(printable)
+
+
+def main():
+    if WORKING_REPOSITORY.exists():
+        raise FileExistsError(f"Refusing to reuse source checkout: {WORKING_REPOSITORY}")
+    run(["git", "clone", "--no-checkout", GITHUB_REPOSITORY, WORKING_REPOSITORY])
+    run(["git", "-C", WORKING_REPOSITORY, "checkout", "--detach", SOURCE_COMMIT])
+    observed_commit = subprocess.check_output(
+        ["git", "-C", str(WORKING_REPOSITORY), "rev-parse", "HEAD"],
+        text=True,
+    ).strip()
+    if observed_commit != SOURCE_COMMIT:
+        raise RuntimeError(f"Frozen source mismatch: {observed_commit} != {SOURCE_COMMIT}")
+    sys.path.insert(0, str(WORKING_REPOSITORY))
+    from src.pgf_single_seed_kaggle import execute_single_seed
+
+    execute_single_seed(TARGET_SEED, WORKING_REPOSITORY, OUTPUT_ROOT, SOURCE_COMMIT)
+
+
+if __name__ == "__main__":
+    main()
