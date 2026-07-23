@@ -24,10 +24,12 @@ Official DRM remains a separate single-checkpoint eval-only reference. STP remai
 | PGF-03 | Add a private three-seed pilot Kaggle launcher with unique checkpoint paths | done | `kaggle-paper-grade-training-foundation-v0/` |
 | PGF-04 | Run local synthetic and package smoke tests without opening final splits | done | `tests/test_paper_grade_training_foundation_v0.py` |
 | PGF-05 | Execute and verify the three-seed Val-only pilot | in_progress | `outputs_log/kaggle-paper-grade-training-foundation-v0-pilot/` |
+| PGF-05a | Partition the pilot into one immutable Kaggle output per seed | in_progress | `kaggle-paper-grade-training-foundation-v0-seed-*/` |
+| PGF-05b | Replay three seed artifacts and freeze the pilot manifest | blocked | `experiments/paper_grade_training_foundation_v0/pilot_manifest.json` |
 | PGF-06 | Execute the two frozen completion seeds and freeze the validation manifest | blocked | `experiments/paper_grade_training_foundation_v0/five_seed_validation_manifest.json` |
 | PGF-07 | Run the one-shot five-seed final evaluation after PGF-06 | blocked | `experiments/paper_grade_training_foundation_v0/five_seed_final_evaluation.json` |
 | PGF-08 | Apply the validity gate and write the final assessment | blocked | `experiments/paper_grade_training_foundation_v0/closure_receipt.json` |
 
 PGF-06 is blocked on a valid PGF-05 pilot. PGF-07 and PGF-08 are blocked until a valid five-seed validation manifest exists.
 
-The first PGF-05 attempt stopped before completing epoch 1 because the default AMP loss scale produced a non-finite gradient at seed `20260721`, batch 0. The metric-free implementation repair is frozen in [`implementation_repair_1.md`](implementation_repair_1.md); PGF-05 remains incomplete until all three repaired pilot runs pass their original gates.
+The first PGF-05 attempt stopped before completing epoch 1 because the default AMP loss scale produced a non-finite gradient at seed `20260721`, batch 0. The metric-free implementation repair is frozen in [`implementation_repair_1.md`](implementation_repair_1.md). The repaired combined run then hit Kaggle's runtime boundary during the second seed and exported no artifacts; its scheduling repair is frozen in [`infrastructure_repair_2.md`](infrastructure_repair_2.md). PGF-05 remains incomplete until all three independent seed outputs pass their original gates and PGF-05b freezes their aggregate manifest.
