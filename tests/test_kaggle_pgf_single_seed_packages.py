@@ -8,7 +8,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).parents[1]
 SOURCE_COMMIT = "a97bfa5af010096701fe43a08e0f24678123353b"
-SEEDS = (20260721, 20260722, 20260723)
+PILOT_SEEDS = (20260721, 20260722, 20260723)
+COMPLETION_SEEDS = (20260724, 20260725)
+SEEDS = PILOT_SEEDS + COMPLETION_SEEDS
+ALLOWED_OWNERS = {"klinh1912", "thanhquang71"}
 
 
 def package_root(seed):
@@ -29,9 +32,11 @@ def test_package_is_private_gpu_single_seed_kernel(seed):
     metadata = json.loads((root / "kernel-metadata.json").read_text(encoding="utf-8"))
     launcher = load_launcher(seed)
 
-    assert metadata["id"] == f"klinh1912/poorfrogs-pgf-v0-seed-{seed}"
+    owner, slug = metadata["id"].split("/", 1)
+    assert owner in ALLOWED_OWNERS
+    assert slug == f"poorfrogs-pgf-v0-seed-{seed}"
     title_slug = re.sub(r"[^a-z0-9]+", "-", metadata["title"].lower()).strip("-")
-    assert title_slug == metadata["id"].split("/", 1)[1]
+    assert title_slug == slug
     assert metadata["is_private"] is True
     assert metadata["enable_gpu"] is True
     assert metadata["enable_internet"] is True
@@ -39,13 +44,18 @@ def test_package_is_private_gpu_single_seed_kernel(seed):
     assert launcher.SOURCE_COMMIT == SOURCE_COMMIT
     assert launcher.TARGET_SEED == seed
     assert str(seed) in str(launcher.OUTPUT_ROOT)
+    if seed in COMPLETION_SEEDS:
+        assert owner == "thanhquang71"
+        assert metadata["machine_shape"] == "NvidiaTeslaT4"
+        assert launcher.VALIDATION_SEEDS == SEEDS
 
 
-def test_packages_differ_only_by_seed_specific_values():
+@pytest.mark.parametrize("seeds", (PILOT_SEEDS, COMPLETION_SEEDS))
+def test_packages_in_each_stage_differ_only_by_seed_specific_values(seeds):
     normalized_sources = []
-    for seed in SEEDS:
+    for seed in seeds:
         source = (package_root(seed) / "kaggle_main.py").read_text(encoding="utf-8")
-        normalized_sources.append(source.replace(str(seed), "<SEED>"))
+        normalized_sources.append(re.sub(r"TARGET_SEED = \d+", "TARGET_SEED = <SEED>", source))
 
     assert len(set(normalized_sources)) == 1
 
@@ -75,6 +85,7 @@ def test_launcher_dispatches_exactly_one_seed(monkeypatch, seed, tmp_path):
         "FakeModule",
         (),
         {
+            "PILOT_SEEDS": PILOT_SEEDS,
             "execute_single_seed": staticmethod(
                 lambda observed_seed, observed_repository, output_root, source_commit: calls.append(
                     ("execute", observed_seed, observed_repository, output_root, source_commit)
